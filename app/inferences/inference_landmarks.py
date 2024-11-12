@@ -144,7 +144,7 @@ class LandmarksProcessor:
         # Добавляем прогресс-бар с общим количеством кадров
         with tqdm(
             total=total_processed_frames,
-            desc="Анализ положения фигуры спортсмена",
+            desc="Анализ видео",
         ) as pbar:
             frame_idx = 0
             processed_frame_count = 0
