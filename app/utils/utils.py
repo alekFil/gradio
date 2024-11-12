@@ -51,3 +51,55 @@ def save_cached_landmarks(video_hash, landmarks_data, world_landmarks_data):
 
     with open(world_landmarks_path, "wb") as f:
         pickle.dump(world_landmarks_data, f)
+
+
+def find_reels_fragments(labels, target_class, batch_size):
+    fragments = []
+
+    # Параметры для поиска последовательностей
+    start = None
+    count = 0
+
+    for i, label in enumerate(labels):
+        if label == target_class:
+            if start is None:
+                start = i
+            count += 1
+        else:
+            if start is not None and count >= 1:
+                # Определяем индекс среднего элемента
+                middle_index = start + count // 2
+
+                # Определяем, к какому батчу относится средний элемент
+                batch_index = middle_index // batch_size
+
+                # Определяем начало и конец соседних батчей
+                start_batch = max(0, (batch_index - 1) * batch_size)
+                end_batch = min(len(labels) - 1, (batch_index + 2) * batch_size - 1)
+
+                # Объединяем с предыдущим фрагментом, если они пересекаются
+                if fragments and start_batch <= fragments[-1][1]:
+                    # Обновляем конец последнего фрагмента
+                    fragments[-1] = (fragments[-1][0], max(fragments[-1][1], end_batch))
+                else:
+                    # Добавляем новый фрагмент
+                    fragments.append((start_batch, end_batch))
+
+            # Сброс параметров
+            start = None
+            count = 0
+
+    # Проверка для последней последовательности
+    if start is not None and count >= 3:
+        middle_index = start + count // 2
+        batch_index = middle_index // batch_size
+        start_batch = max(0, (batch_index - 1) * batch_size)
+        end_batch = min(len(labels) - 1, (batch_index + 2) * batch_size - 1)
+
+        # Объединяем с предыдущим фрагментом, если они пересекаются
+        if fragments and start_batch <= fragments[-1][1]:
+            fragments[-1] = (fragments[-1][0], max(fragments[-1][1], end_batch))
+        else:
+            fragments.append((start_batch, end_batch))
+
+    return fragments

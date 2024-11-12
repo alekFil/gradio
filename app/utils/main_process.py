@@ -1,9 +1,8 @@
-import os
-
 import gradio as gr
 from inferences.inference_elements import predict
 from inferences.inference_landmarks import LandmarksProcessor
 from utils import utils as u
+from utils.reels_processor import ReelsProcessor
 
 LANDMARK_MODELS = {
     "Lite": "app/inferences/models/landmarkers/pose_landmarker_lite.task",
@@ -41,4 +40,18 @@ def process_video(
     predicted_labels, _ = predict(landmarks_data, world_landmarks_data)
     print(f"{predicted_labels[405:420]=}")
 
-    return os.path.join("app/output/processed_video_compatible.mp4")
+    reels_fragments = u.find_reels_fragments(predicted_labels, 1, 25)
+    print(reels_fragments)
+    reels = [(x * 3, y * 3) for x, y in reels_fragments]
+
+    reels_processor = ReelsProcessor(video_file, step=3)
+    processed_video = reels_processor.process_jumps(
+        tuple(reels),
+        landmarks_data,
+        padding=0,
+        draw_mode=draw_mode,
+    )
+
+    print("Обработанное видео сохранено как:", processed_video)
+
+    return processed_video
