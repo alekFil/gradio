@@ -1,5 +1,6 @@
-*
-!/app
-!Dockerfile
-!README.md
-!requirements.txt
+.vscode/
+app/resources/*
+__pycache__
+notebooks/
+fsva/
+Dockerfile

@@ -445,20 +445,15 @@ class ReelsProcessor:
                     "-pix_fmt",
                     "yuv420p",
                     "-b:v",
-                    str(original_bitrate),
+                    f"{original_bitrate}",  # Применяем оригинальный битрейт
+                    "-profile:v",
+                    "high",  # Используем профиль высокого качества
+                    "-crf",
+                    "18",  # Улучшаем качество путем настройки компрессии
                     clip_path,
                 ]
             )
 
-            # # Применяем fade к фрагменту
-            # faded_clip_path = os.path.join(self.temp_dir, f"jump_clip_faded_{idx}.mp4")
-            # self.apply_fade_effect(
-            #     clip_path,
-            #     faded_clip_path,
-            #     fade_in_duration=0.5,
-            #     fade_out_duration=0.5,
-            # )
-            # processed_clips.append(faded_clip_path)
             processed_clips.append(clip_path)
 
         cap.release()
@@ -471,78 +466,6 @@ class ReelsProcessor:
         self.cleanup_temp_files()
 
         return final_output_path
-
-    def cut_video_segment(self, start_time, end_time, output_path):
-        command = [
-            "ffmpeg",
-            "-y",
-            "-i",
-            self.input_video,
-            "-ss",
-            str(start_time),
-            "-to",
-            str(end_time),
-            "-c:v",
-            "libx264",
-            "-c:a",
-            "aac",
-            "-strict",
-            "experimental",
-            output_path,
-        ]
-        subprocess.run(command, check=True)
-        self.temp_files.append(output_path)
-
-    def apply_fade_effect(
-        self,
-        input_path,
-        output_path,
-        fade_in_duration=0.5,
-        fade_out_duration=0.5,
-    ):
-        probe = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                input_path,
-            ],
-            capture_output=True,
-            text=True,
-        )
-
-        if probe.returncode != 0:
-            # Отладочное сообщение в случае ошибки выполнения ffprobe
-            print("Ошибка при выполнении ffprobe:", probe.stderr)
-            raise RuntimeError("ffprobe не смог получить длительность видео.")
-
-        try:
-            duration = float(probe.stdout.strip())
-        except ValueError:
-            # Отладочное сообщение, если результат пустой или не является числом
-            print(
-                "Не удалось получить длительность видео. " "Вывод ffprobe:",
-                probe.stdout,
-            )
-            raise ValueError("Не удалось конвертировать вывод ffprobe в число.")
-
-        command = [
-            "ffmpeg",
-            "-y",
-            "-i",
-            input_path,
-            "-vf",
-            f"fade=t=in:st=0:d={fade_in_duration},fade=t=out:st={duration - fade_out_duration}:d={fade_out_duration}",
-            "-c:a",
-            "copy",
-            output_path,
-        ]
-        subprocess.run(command, check=True)
-        self.temp_files.append(output_path)
 
     # Дополнительная функция для получения длительности видео
     def get_video_duration(self, video_path):
@@ -582,86 +505,111 @@ class ReelsProcessor:
         return int(result.stdout.strip())
 
     def concat_clips(self, clips, output_path):
-        # Временные параметры для эффектов
-        intermediate_output = "intermediate_temp.mp4"
-        fade_duration = 1  # Длительность переходов
-        original_bitrate = self.get_video_bitrate(self.input_video)
+        # Путь к файлу для записи логов ffmpeg
+        ffmpeg_log_path = "ffmpeg_concat.log"
 
-        # Применяем fade-in к первому клипу
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-i",
-                clips[0],
-                "-vf",
-                f"fade=t=in:st=0:d={fade_duration}",
-                "-c:v",
-                "libx264",
-                "-pix_fmt",
-                "yuv420p",
-                "-b:v",
-                str(original_bitrate),
-                intermediate_output,
-            ]
-        )
+        # Открываем файл для записи логов
+        with open(ffmpeg_log_path, "a") as log_file:
+            # Временные параметры для эффектов
+            intermediate_output = "intermediate_temp.mp4"
+            fade_duration = 1  # Длительность переходов
+            original_bitrate = self.get_video_bitrate(self.input_video)
 
-        # Начальный offset для первого перехода
-        current_offset = self.get_video_duration(intermediate_output) - fade_duration
+            # Применяем fade-in к первому клипу
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    clips[0],
+                    "-vf",
+                    f"fade=t=in:st=0:d={fade_duration}",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-b:v",
+                    f"{original_bitrate}",  # Применяем оригинальный битрейт
+                    "-profile:v",
+                    "high",
+                    "-crf",
+                    "18",
+                    intermediate_output,
+                ],
+                stdout=log_file,
+                stderr=log_file,
+            )
 
-        # Проходим по остальным клипам, объединяя их с эффектом xfade и корректируя offset
-        for i in range(1, len(clips)):
-            next_clip = clips[i]
-            xfade_output = f"temp_xfade_{i}.mp4"
+            # Начальный offset для первого перехода
+            current_offset = (
+                self.get_video_duration(intermediate_output) - fade_duration
+            )
 
-            # Склеиваем текущий промежуточный файл с очередным клипом
+            # Проходим по остальным клипам, объединяя их с эффектом xfade и корректируя offset
+            for i in range(1, len(clips)):
+                next_clip = clips[i]
+                xfade_output = f"temp_xfade_{i}.mp4"
+
+                # Склеиваем текущий промежуточный файл с очередным клипом
+                subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-y",
+                        "-i",
+                        intermediate_output,
+                        "-i",
+                        next_clip,
+                        "-filter_complex",
+                        f"[0:v][1:v]xfade=transition=fade:duration={fade_duration}:offset={current_offset}[v]",
+                        "-map",
+                        "[v]",
+                        "-c:v",
+                        "libx264",
+                        "-pix_fmt",
+                        "yuv420p",
+                        "-b:v",
+                        f"{original_bitrate}",  # Применяем оригинальный битрейт
+                        "-profile:v",
+                        "high",
+                        "-crf",
+                        "18",
+                        xfade_output,
+                    ],
+                    stdout=log_file,
+                    stderr=log_file,
+                )
+
+                # Обновляем промежуточный файл
+                intermediate_output = xfade_output
+
+                # Обновляем offset для следующего перехода
+                current_offset += self.get_video_duration(next_clip) - fade_duration
+
+            # Добавляем fade-out к последнему объединенному клипу
+            final_duration = self.get_video_duration(intermediate_output)
             subprocess.run(
                 [
                     "ffmpeg",
                     "-y",
                     "-i",
                     intermediate_output,
-                    "-i",
-                    next_clip,
-                    "-filter_complex",
-                    f"[0:v][1:v]xfade=transition=fade:duration={fade_duration}:offset={current_offset}[v]",
-                    "-map",
-                    "[v]",
+                    "-vf",
+                    f"fade=t=out:st={final_duration - fade_duration}:d={fade_duration}",
                     "-c:v",
                     "libx264",
                     "-pix_fmt",
                     "yuv420p",
                     "-b:v",
-                    str(original_bitrate),
-                    xfade_output,
-                ]
+                    f"{original_bitrate}",  # Применяем оригинальный битрейт
+                    "-profile:v",
+                    "high",
+                    "-crf",
+                    "18",
+                    output_path,
+                ],
+                stdout=log_file,
+                stderr=log_file,
             )
-
-            # Обновляем промежуточный файл
-            intermediate_output = xfade_output
-
-            # Обновляем offset для следующего перехода
-            current_offset += self.get_video_duration(next_clip) - fade_duration
-
-        # Добавляем fade-out к последнему объединенному клипу
-        final_duration = self.get_video_duration(intermediate_output)
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-i",
-                intermediate_output,
-                "-vf",
-                f"fade=t=out:st={final_duration - fade_duration}:d={fade_duration}",
-                "-c:v",
-                "libx264",
-                "-pix_fmt",
-                "yuv420p",
-                "-b:v",
-                str(original_bitrate),
-                output_path,
-            ]
-        )
 
         # Удаляем временные файлы
         for i in range(1, len(clips)):
@@ -673,96 +621,3 @@ class ReelsProcessor:
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
         self.temp_files.clear()
-
-
-def convert_to_whatsapp_format(input_path, output_path):
-    """
-    Перекодирует видео в формат, подходящий для отправки через WhatsApp.
-    Требования WhatsApp:
-      - Формат: MP4
-      - Кодек видео: H.264 (профиль Baseline)
-      - Кодек аудио: AAC
-      - Максимальная длительность: до 1 минуты
-      - Максимальное разрешение: 640x640
-    """
-    try:
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-i",
-                input_path,
-                "-vf",
-                "scale=640:640:force_original_aspect_ratio=decrease",
-                "-c:v",
-                "libx264",
-                "-profile:v",
-                "baseline",
-                "-level",
-                "3.0",
-                "-pix_fmt",
-                "yuv420p",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "64k",
-                "-b:v",
-                "500k",  # Умеренный битрейт для снижения размера
-                "-maxrate",
-                "500k",
-                "-bufsize",
-                "1000k",
-                "-t",
-                "00:01:00",  # Ограничение по длительности на 1 минуту
-                output_path,
-            ],
-            check=True,
-        )
-        print("Конвертация для WhatsApp завершена успешно.")
-    except subprocess.CalledProcessError:
-        print("Ошибка при конвертации для WhatsApp.")
-
-
-def convert_to_instagram_format(input_path, output_path):
-    """
-    Перекодирует видео в формат, подходящий для публикации в Instagram.
-    Требования Instagram:
-      - Формат: MP4
-      - Кодек видео: H.264 (профиль Main или High)
-      - Кодек аудио: AAC
-      - Максимальное разрешение: до 1080x1920 для вертикальных видео
-    """
-    try:
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-i",
-                input_path,
-                "-vf",
-                "scale=1080:1920:force_original_aspect_ratio=decrease",
-                "-c:v",
-                "libx264",
-                "-profile:v",
-                "high",  # Поддержка высокого качества для Instagram
-                "-level",
-                "4.2",
-                "-pix_fmt",
-                "yuv420p",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "128k",
-                "-b:v",
-                "5000k",  # Более высокий битрейт для Instagram
-                "-maxrate",
-                "5000k",
-                "-bufsize",
-                "10000k",
-                output_path,
-            ],
-            check=True,
-        )
-        print("Конвертация для Instagram завершена успешно.")
-    except subprocess.CalledProcessError:
-        print("Ошибка при конвертации для Instagram.")

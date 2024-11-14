@@ -3,3 +3,4 @@ torch
 mediapipe
 tqdm
 opencv-python
+gradio_log

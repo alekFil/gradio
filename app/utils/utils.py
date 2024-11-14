@@ -2,7 +2,7 @@ import hashlib
 import os
 import pickle
 
-CACHE_DIR = "app/landmarks_cache"
+CACHE_DIR = "app/resources/landmarks_cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 

@@ -1,2 +1,6 @@
-app/output/
+app/resources/*
 __pycache__
+.vscode/
+notebooks/*
+fsva/
+test.py
