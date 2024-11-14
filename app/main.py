@@ -68,7 +68,7 @@ with gr.Blocks() as fsva:
         video_input.change(enable_button, [video_input], run_button)
 
     with gr.Row():
-        Log(log_file, dark=False)
+        Log(log_file, dark=True)
         # Переключатель режима отрисовки
 
     # Настраиваем кнопку запуска, чтобы она выводила
