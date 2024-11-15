@@ -1,7 +1,7 @@
 import re
 
 import gradio as gr
-from gradio_log import Log
+from gradio_log import Log # type: ignore
 from utils.logger import setup_logger
 from utils.main_process import process_video
 
@@ -48,6 +48,7 @@ with gr.Blocks() as fsva:
             )
 
     with gr.Row():
+        # Переключатель режима отрисовки
         draw_mode = gr.Radio(
             label="Выберите режим отрисовки (в разработке)",
             choices=["Скелет", "Траектория двух точек", "Чистое видео"],
@@ -68,8 +69,8 @@ with gr.Blocks() as fsva:
         video_input.change(enable_button, [video_input], run_button)
 
     with gr.Row():
-        Log(log_file, dark=True)
-        # Переключатель режима отрисовки
+        Log(log_file, dark=False)
+        
 
     # Настраиваем кнопку запуска, чтобы она выводила
     # короткое видео в соседний столбец

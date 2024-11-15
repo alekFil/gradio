@@ -1,9 +1,37 @@
 import hashlib
 import os
 import pickle
+from functools import wraps
+from time import time
 
 CACHE_DIR = "app/resources/landmarks_cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
+
+
+# Декоратор для логирования времени выполнения
+def log_execution_time(
+    logger,
+    start_msg="Начало выполнения",
+    end_msg="Окончание выполнения",
+):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            start_time = time()
+            logger.debug(f"{start_msg}: {start_time}")
+
+            result = func(*args, **kwargs)
+
+            end_time = time()
+            elapsed_time = end_time - start_time
+            logger.debug(f"{end_msg}: {end_time}")
+            logger.debug(f"Время выполнения {func.__name__}: {elapsed_time:.4f} секунд")
+
+            return result
+
+        return wrapper
+
+    return decorator
 
 
 def generate_video_hash(video_path):

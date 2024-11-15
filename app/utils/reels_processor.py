@@ -5,9 +5,13 @@ import tempfile
 import time
 from collections import deque
 
-import cv2
-import numpy as np
-from tqdm import tqdm
+import cv2  # type: ignore
+import numpy as np  # type: ignore
+from tqdm import tqdm  # type: ignore
+from utils.logger import setup_logger
+
+# Инициализируем логгер
+logger = setup_logger("main", "app/resources/logs/main.log")
 
 
 class ReelsProcessor:
@@ -279,6 +283,7 @@ class ReelsProcessor:
         processed_clips = []  # для хранения путей к обработанным клипам
 
         for idx, (start_frame, end_frame) in enumerate(jump_frames):
+            logger.info(f"Отрисовка прыжка {idx+1}.")
             cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
             # print(f"{landmarks_tensor.shape=}")
             frames_dir = os.path.join(self.temp_dir, f"jump_clip_{idx}")
@@ -430,6 +435,7 @@ class ReelsProcessor:
                 frame_count += 1
 
             time.sleep(1)
+            logger.info(f"Создание видео из кадров прыжка {idx+1}.")
             # Создание видео из кропнутых кадров с помощью ffmpeg
             clip_path = os.path.join(self.temp_dir, f"jump_clip_{idx}.mp4")
             subprocess.run(
@@ -515,6 +521,7 @@ class ReelsProcessor:
             fade_duration = 1  # Длительность переходов
             original_bitrate = self.get_video_bitrate(self.input_video)
 
+            logger.info("Создание вступительного перехода видео")
             # Применяем fade-in к первому клипу
             subprocess.run(
                 [
@@ -545,11 +552,13 @@ class ReelsProcessor:
                 self.get_video_duration(intermediate_output) - fade_duration
             )
 
+            logger.info("Создание переходов между прыжками")
             # Проходим по остальным клипам, объединяя их с эффектом xfade и корректируя offset
             for i in range(1, len(clips)):
                 next_clip = clips[i]
                 xfade_output = f"temp_xfade_{i}.mp4"
 
+                logger.info(f"... прыжок {i}")
                 # Склеиваем текущий промежуточный файл с очередным клипом
                 subprocess.run(
                     [
@@ -585,6 +594,7 @@ class ReelsProcessor:
                 # Обновляем offset для следующего перехода
                 current_offset += self.get_video_duration(next_clip) - fade_duration
 
+            logger.info("Создание заключительного перехода видео")
             # Добавляем fade-out к последнему объединенному клипу
             final_duration = self.get_video_duration(intermediate_output)
             subprocess.run(

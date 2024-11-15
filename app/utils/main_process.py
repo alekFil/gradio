@@ -1,12 +1,13 @@
 import re
-from time import time
 
-import gradio as gr
 from inferences.inference_elements import predict
 from inferences.inference_landmarks import LandmarksProcessor
 from utils import utils as u
 from utils.logger import setup_logger
 from utils.reels_processor import ReelsProcessor
+from utils.utils import log_execution_time
+
+import gradio as gr
 
 # Инициализируем логгер
 logger = setup_logger("main", "app/resources/logs/main.log")
@@ -20,6 +21,16 @@ LANDMARK_MODELS = {
 hash_pattern = re.compile(r"/([a-f0-9]{64})/")
 
 
+@log_execution_time(logger, "Начало расчета landmarks", "Окончание расчета landmarks")
+def calculate_landmarks(video_file, video_hash):
+    landmarks_data, world_landmarks_data, figure_masks_data = LandmarksProcessor(
+        LANDMARK_MODELS["Lite"],
+        video_hash,
+        do_resize=True,
+    ).process_video(video_file, step=3)
+    return landmarks_data, world_landmarks_data, figure_masks_data
+
+
 def process_video(
     video_file,
     draw_mode,
@@ -28,43 +39,33 @@ def process_video(
 ):
     gradio_dirname = hash_pattern.search(video_file).group(1)
     logger.debug(f"Начата работа с видео: {gradio_dirname}")
-    gr.update()
     # Генерируем хеш видеофайла
     video_hash = u.generate_video_hash(video_file)
-    logger.debug(f"Сгенерирован хэш видео: {video_hash=}")
-    gr.update()
+    logger.debug(f"Сгенерирован хэш видео: {video_hash}")
 
     # Проверяем кэш на наличие предсказанных скелетных данных
     landmarks_data, world_landmarks_data = u.load_cached_landmarks(video_hash)
     if landmarks_data is None:
         # Если данных нет в кэше, запускаем процесс расчета и сохраняем результат
         logger.info("Данных landmarks в кэше не имеется.")
-        logger.debug(f"Начало расчета landmarks: {time()}")
-        gr.update()
-        landmarks_data, world_landmarks_data, figure_masks_data = LandmarksProcessor(
-            LANDMARK_MODELS["Lite"],
+        landmarks_data, world_landmarks_data, _ = calculate_landmarks(
+            video_file,
             video_hash,
-            do_resize=True,
-        ).process_video(video_file, step=3)
-        logger.debug(f"Окончание расчета landmarks: {time()}")
-        gr.update()
+        )
 
         # Сохраняем landmarks_data в кэш
         u.save_cached_landmarks(video_hash, landmarks_data, world_landmarks_data)
         logger.info("Данные landmarks кэшированы.")
-        gr.update()
     else:
         logger.info("Данные landmarks загружены из кэша.")
-        gr.update()
-
-    print(landmarks_data[0], world_landmarks_data[0], sep="\n")
 
     predicted_labels, _ = predict(landmarks_data, world_landmarks_data)
-    print(f"{predicted_labels[405:420]=}")
 
     reels_fragments = u.find_reels_fragments(predicted_labels, 1, 25)
+    logger.info(f"Обнаружено {len(reels_fragments)} прыжка(-ов) (указаны кадры):")
     print(reels_fragments)
     reels = [(x * 3, y * 3) for x, y in reels_fragments]
+    logger.info(f"{reels}")
 
     reels_processor = ReelsProcessor(video_file, step=3)
     processed_video = reels_processor.process_jumps(

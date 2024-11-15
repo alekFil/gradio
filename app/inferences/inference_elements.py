@@ -1,10 +1,15 @@
 import random
 
-import numpy as np
-import torch
-import torch.nn.functional as F
+import numpy as np  # type: ignore
+import torch  # type: ignore
+import torch.nn.functional as F  # type: ignore
 from inferences.models.elements.elements_model import BiLSTMModel
-from torch.nn.utils.rnn import pad_sequence
+from torch.nn.utils.rnn import pad_sequence  # type: ignore
+from utils.logger import setup_logger
+from utils.utils import log_execution_time
+
+# Инициализируем логгер
+logger = setup_logger("main", "app/resources/logs/main.log")
 
 
 def set_seed(seed):
@@ -73,6 +78,7 @@ num_classes = 3
 INFERENCE_ELEMENTS = ModelElementsInference(model_path, parameters, num_classes)
 
 
+@log_execution_time(logger, "Начало предсказания", "Окончание предсказания")
 def predict(landmarks_data, world_landmarks_data):
     landmarks_tensor = torch.tensor(landmarks_data)
     world_landmarks_tensor = torch.tensor(world_landmarks_data)

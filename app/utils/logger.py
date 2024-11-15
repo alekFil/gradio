@@ -8,10 +8,12 @@ class UTC6Formatter(logging.Formatter):
     converter = datetime.fromtimestamp
 
     def formatTime(self, record, datefmt=None):
+        # Назначаем значение по умолчанию для datefmt, если оно не задано
+        if datefmt is None:
+            datefmt = "%Y-%m-%d %H-%M-%S"  # Устанавливаем формат по умолчанию
+
         dt = self.converter(record.created, timezone(timedelta(hours=6)))  # UTC+6
-        if datefmt:
-            return dt.strftime(datefmt)
-        return dt.isoformat()  # стандартный ISO формат
+        return dt.strftime(datefmt)
 
 
 # Функция для настройки логирования с тайм-зоной UTC+6
