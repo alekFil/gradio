@@ -167,7 +167,6 @@ class LandmarksProcessor:
                         self.process_frame(frame, timestamp_ms)
                         pbar.update(1)
                     frames_batch.clear()
-                    print(f"{check_ids=}")
                     check_ids = []
                 frame_idx += 1
 
@@ -179,7 +178,6 @@ class LandmarksProcessor:
                     check_ids.append(frame_idx)
                     frame_idx += 1
                     pbar.update(1)  # Обновляем прогресс-бар
-                print(f"{check_ids=}")
 
         cap.release()
         landmarks_data, world_landmarks_data, masks_data = self.return_data()

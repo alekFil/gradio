@@ -217,11 +217,11 @@ class ReelsProcessor:
         """
         Вписывает обрезанное видео в фон 9:16, заполняя сверху и снизу размытым видео.
 
-        Параметры:
+        Parameters:
         - frame: исходный кадр видео.
         - crop_frame: обрезанный кадр с паддингом.
 
-        Возвращает:
+        Returns:
         - output_frame: кадр 9:16 с размытым фоном.
         """
         # Размеры целевого фона (9:16)
@@ -250,8 +250,8 @@ class ReelsProcessor:
         self,
         jump_frames,
         landmarks_tensor,
-        smooth_window=10,
-        padding=200,
+        smooth_window=3,
+        padding=0,
         draw_mode="Trajectory",
         progress=None,
     ):
@@ -292,6 +292,7 @@ class ReelsProcessor:
             # Сбрасываем счётчик для новой папки
             frame_count = 0
 
+            print(f"Сохраняем кадры в {frames_dir}")
             for frame_idx in tqdm(
                 range(start_frame, end_frame + 1),
                 desc="Отрисовка видео",
@@ -430,35 +431,39 @@ class ReelsProcessor:
                 # cv2.imwrite(frame_path, output_frame)
                 if not cv2.imwrite(frame_path, output_frame):
                     print(f"Не удалось сохранить кадр {frame_count} в {frame_path}")
-                else:
-                    print(f"Кадр {frame_count} сохранен в {frame_path}")
                 frame_count += 1
 
             time.sleep(1)
             logger.info(f"Создание видео из кадров прыжка {idx+1}.")
             # Создание видео из кропнутых кадров с помощью ffmpeg
             clip_path = os.path.join(self.temp_dir, f"jump_clip_{idx}.mp4")
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-framerate",
-                    str(self.video_fps),
-                    "-i",
-                    os.path.join(frames_dir, "frame_%05d.png"),
-                    "-c:v",
-                    "libx264",
-                    "-pix_fmt",
-                    "yuv420p",
-                    "-b:v",
-                    f"{original_bitrate}",  # Применяем оригинальный битрейт
-                    "-profile:v",
-                    "high",  # Используем профиль высокого качества
-                    "-crf",
-                    "18",  # Улучшаем качество путем настройки компрессии
-                    clip_path,
-                ]
-            )
+            # Путь к файлу для записи логов ffmpeg
+            ffmpeg_log_path = "ffmpeg_concat.log"
+            # Открываем файл для записи логов
+            with open(ffmpeg_log_path, "a") as log_file:
+                subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-y",
+                        "-framerate",
+                        str(self.video_fps),
+                        "-i",
+                        os.path.join(frames_dir, "frame_%05d.png"),
+                        "-c:v",
+                        "libx264",
+                        "-pix_fmt",
+                        "yuv420p",
+                        "-b:v",
+                        f"{original_bitrate}",  # Применяем оригинальный битрейт
+                        "-profile:v",
+                        "high",  # Используем профиль высокого качества
+                        "-crf",
+                        "18",  # Улучшаем качество путем настройки компрессии
+                        clip_path,
+                    ],
+                    stdout=log_file,
+                    stderr=log_file,
+                )
 
             processed_clips.append(clip_path)
 
@@ -621,6 +626,7 @@ class ReelsProcessor:
                 stderr=log_file,
             )
 
+        logger.info("Готово")
         # Удаляем временные файлы
         for i in range(1, len(clips)):
             os.remove(f"temp_xfade_{i}.mp4")
