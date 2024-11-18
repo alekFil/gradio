@@ -1,9 +1,9 @@
 import gc
 
-import cv2
-import mediapipe as mp
-import numpy as np
-from tqdm import tqdm
+import cv2  # type: ignore
+import mediapipe as mp  # type: ignore
+import numpy as np  # type: ignore
+from tqdm import tqdm  # type: ignore
 
 BaseOptions = mp.tasks.BaseOptions
 PoseLandmarker = mp.tasks.vision.PoseLandmarker
@@ -30,8 +30,10 @@ class LandmarksProcessor:
         self.display = display
         self.calculate_masks = calculate_masks
         self.do_resize = do_resize
-        self.buffer = []  # Буфер для сохранения данных
-        self._initialize_detector()  # Инициализация детектора
+        # Буфер для сохранения данных
+        self.buffer = []
+        # Инициализация детектора
+        self._initialize_detector()
         self.key = key
 
     def _initialize_detector(self):
@@ -45,6 +47,7 @@ class LandmarksProcessor:
 
     def process_frame(self, frame, timestamp_ms):
         # Обработка кадра (при необходимости изменяем его размер)
+        # Здесь также уйду от обработки OpenCV - занимает немало времени
         if self.do_resize:
             frame_resized = cv2.resize(frame, (self.new_width, self.new_height))
         else:
@@ -128,6 +131,10 @@ class LandmarksProcessor:
             return (landmarks_data, world_landmarks_data, masks_data)
 
     def process_video(self, video_path, step=1):
+        """
+        Здесь планируется уйти от OpenCV и не читать все кадры подряд.
+        Планирую работать напрямую с ffmpeg
+        """
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             print("Ошибка: Не удалось открыть видео.")

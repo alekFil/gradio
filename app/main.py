@@ -1,9 +1,10 @@
 import re
 
-import gradio as gr
-from gradio_log import Log # type: ignore
+from gradio_log import Log  # type: ignore
 from utils.logger import setup_logger
 from utils.main_process import process_video
+
+import gradio as gr
 
 # Инициализируем логгер
 log_file = "app/resources/logs/main.log"
@@ -53,6 +54,7 @@ with gr.Blocks() as fsva:
             label="Выберите режим отрисовки (в разработке)",
             choices=["Скелет", "Траектория двух точек", "Чистое видео"],
             value="Чистое видео",
+            interactive=False,
         )
 
         # Переключатель режима отрисовки
@@ -60,6 +62,7 @@ with gr.Blocks() as fsva:
             label="Выберите качество (в разработке)",
             choices=["Whatsapp", "Instagram", "Оригинальное качество"],
             value="Оригинальное качество",
+            interactive=False,
         )
 
     with gr.Row():
@@ -70,7 +73,6 @@ with gr.Blocks() as fsva:
 
     with gr.Row():
         Log(log_file, dark=False)
-        
 
     # Настраиваем кнопку запуска, чтобы она выводила
     # короткое видео в соседний столбец

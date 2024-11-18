@@ -1,8 +1,11 @@
 import hashlib
 import os
 import pickle
+import subprocess
 from functools import wraps
 from time import time
+
+import cv2  # type: ignore
 
 CACHE_DIR = "app/resources/landmarks_cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
@@ -131,3 +134,53 @@ def find_reels_fragments(labels, target_class, batch_size):
             fragments.append((start_batch, end_batch))
 
     return fragments
+
+
+def check_video(video_file):
+    """Проверяет соотношение сторон видео. Если оно не горизонтальное 16:9, то возвращает False"""
+    # Открываем видео
+    cap = cv2.VideoCapture(video_file)
+    if not cap.isOpened():
+        raise ValueError(f"Не удалось открыть видеофайл: {video_file}")
+
+    # Получаем ширину и высоту кадра
+    width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+    height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+    cap.release()
+
+    # Проверяем соотношение сторон
+    aspect_ratio = width / height
+    is_16_9 = abs(aspect_ratio - 16 / 9) < 0.01  # Допустимая погрешность
+    return is_16_9
+
+
+def update_video(video_file):
+    """Приводит видео (перекодирует с использованием ffmpeg к горизонтальному
+    соотношению 16:9, добавляя черный холст).
+    Сохраняет новый файл и возвращает путь к нему"""
+    # Проверка, существует ли входной файл
+    if not os.path.exists(video_file):
+        raise FileNotFoundError(f"Видео файл '{video_file}' не найден.")
+
+    # Получение информации о видео
+    output_file = os.path.splitext(video_file)[0] + "_16_9_2.mp4"
+
+    # Выполнение команды FFmpeg
+    try:
+        command = [
+            "ffmpeg",
+            "-i",
+            video_file,
+            "-vf",
+            "pad=1920:1280:(1920-iw)/2:0",
+            output_file,
+        ]
+        subprocess.run(command, check=True)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"Ошибка при обработке видео с FFmpeg: {e}")
+
+    # Проверка существования выходного файла
+    if not os.path.exists(output_file):
+        raise RuntimeError(f"Не удалось сохранить обработанное видео: {output_file}")
+
+    return output_file

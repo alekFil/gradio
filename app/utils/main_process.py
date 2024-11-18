@@ -39,6 +39,11 @@ def process_video(
 ):
     gradio_dirname = hash_pattern.search(video_file).group(1)
     logger.debug(f"Начата работа с видео: {gradio_dirname}")
+
+    if not u.check_video(video_file):
+        logger.debug("Обнаружено нестандартное видео. Производится перекодировка")
+        video_file = u.update_video(video_file)
+
     # Генерируем хеш видеофайла
     video_hash = u.generate_video_hash(video_file)
     logger.debug(f"Сгенерирован хэш видео: {video_hash}")
@@ -62,7 +67,11 @@ def process_video(
     predicted_labels, _ = predict(landmarks_data, world_landmarks_data)
 
     reels_fragments = u.find_reels_fragments(predicted_labels, 1, 25)
-    logger.info(f"Обнаружено {len(reels_fragments)} прыжка(-ов) (указаны кадры):")
+    if len(reels_fragments) != 0:
+        logger.info(f"Обнаружено {len(reels_fragments)} прыжка(-ов) (указаны кадры):")
+    else:
+        logger.info("Не обнаружено прыжков. Работа завершена")
+        return "Error"
     print(reels_fragments)
     reels = [(x * 3, y * 3) for x, y in reels_fragments]
     logger.info(f"{reels}")

@@ -3,15 +3,45 @@ import shutil
 import subprocess
 import tempfile
 import time
-from collections import deque
 
+# from collections import deque
 import cv2  # type: ignore
 import numpy as np  # type: ignore
+from scipy.interpolate import interp1d  # type: ignore
 from tqdm import tqdm  # type: ignore
 from utils.logger import setup_logger
 
 # Инициализируем логгер
 logger = setup_logger("main", "app/resources/logs/main.log")
+
+
+class SmoothWindowTracker:
+    """
+    Класс для плавного отслеживания положения объекта с фильтрацией.
+    """
+
+    def __init__(self, initial_x, alpha=0.3, threshold=10):
+        """
+        Инициализация трекера.
+
+        :param initial_x: Начальная позиция
+        :param alpha: Коэффициент сглаживания (по умолчанию 0.3)
+        :param threshold: Пороговое значение изменения позиции (по умолчанию 10)
+        """
+        self.current_x = initial_x
+        self.alpha = alpha
+        self.threshold = threshold
+
+    def __call__(self, detected_x):
+        """
+        Вызывается для обновления текущей позиции с фильтрацией.
+
+        :param detected_x: Новая обнаруженная позиция
+        :return: Отфильтрованная позиция
+        """
+        if abs(detected_x - self.current_x) > self.threshold:
+            self.current_x = self.alpha * detected_x + (1 - self.alpha) * self.current_x
+        return self.current_x
 
 
 class ReelsProcessor:
@@ -78,49 +108,77 @@ class ReelsProcessor:
         print(f"Частота кадров (FPS) видео: {fps}")
         return fps
 
-    def interpolate_landmarks(self, landmarks_tensor):
+    def interpolate_zero_landmarks(self, landmarks):
         """
-        Интерполирует нулевые значения в landmarks_tensor, усредняя по соседним значениям.
+        Интерполирует нулевые значения landmarks с использованием линейной интерполяции.
+
+        :param landmarks: Массив формы (num_frames, num_points, coord_dims), где
+                        num_frames — количество кадров,
+                        num_points — количество точек,
+                        coord_dims — размерность координат (например, 2D или 3D).
+        :type landmarks: numpy.ndarray
+        :return: Массив той же формы, с интерполированными координатами.
+        :rtype: numpy.ndarray
         """
-        num_frames, num_points, num_coords = landmarks_tensor.shape
+        interpolated_landmarks = landmarks.copy()
+        num_frames, num_points, coord_dims = landmarks.shape
 
-        for frame_idx in tqdm(range(num_frames)):
-            for point_idx in range(num_points):
-                # Проверяем, если все три координаты точки равны 0
-                if np.array_equal(landmarks_tensor[frame_idx, point_idx], [0, 0, 0]):
-                    prev_frame_idx = frame_idx - 1
-                    next_frame_idx = frame_idx + 1
+        for point_idx in range(num_points):
+            for dim in range(coord_dims):
+                # Извлечение значений для данной точки и размерности
+                values = landmarks[:, point_idx, dim]
+                frames = np.arange(num_frames)
 
-                    # Найти ближайшие предыдущий и следующий кадры с ненулевыми координатами для этой точки
-                    while prev_frame_idx >= 0 and np.array_equal(
-                        landmarks_tensor[prev_frame_idx, point_idx], [0, 0, 0]
-                    ):
-                        prev_frame_idx -= 1
-                    while next_frame_idx < num_frames and np.array_equal(
-                        landmarks_tensor[next_frame_idx, point_idx], [0, 0, 0]
-                    ):
-                        next_frame_idx += 1
+                # Проверяем, какие кадры имеют ненулевые значения
+                non_zero_mask = values != 0
+                non_zero_frames = frames[non_zero_mask]
+                non_zero_values = values[non_zero_mask]
 
-                    # Если найдены валидные предыдущий и следующий кадры, усредняем
-                    if prev_frame_idx >= 0 and next_frame_idx < num_frames:
-                        landmarks_tensor[frame_idx, point_idx] = (
-                            landmarks_tensor[prev_frame_idx, point_idx]
-                            + landmarks_tensor[next_frame_idx, point_idx]
-                        ) / 2
-                    elif (
-                        prev_frame_idx >= 0
-                    ):  # Если есть только предыдущий, используем его координаты
-                        landmarks_tensor[frame_idx, point_idx] = landmarks_tensor[
-                            prev_frame_idx, point_idx
-                        ]
-                    elif (
-                        next_frame_idx < num_frames
-                    ):  # Если есть только следующий, используем его координаты
-                        landmarks_tensor[frame_idx, point_idx] = landmarks_tensor[
-                            next_frame_idx, point_idx
-                        ]
+                if len(non_zero_frames) < 2:
+                    # Если недостаточно точек для интерполяции, пропускаем
+                    continue
 
-        return landmarks_tensor
+                # Линейная интерполяция для заполнения нулей
+                interpolator = interp1d(
+                    non_zero_frames,
+                    non_zero_values,
+                    kind="linear",
+                    fill_value="extrapolate",
+                )
+                interpolated_values = interpolator(frames)
+
+                # Заполняем нули интерполированными значениями
+                interpolated_landmarks[:, point_idx, dim] = interpolated_values
+
+        return interpolated_landmarks
+
+    def interpolate_step_landmarks(self, landmarks, step=3):
+        """
+        Интерполирует координаты landmarks между кадрами.
+
+        :param landmarks: Входной массив с формой (N, 33, 3), где N - количество кадров.
+        :param step: Шаг между кадрами, для которых известны координаты.
+        :return: Расширенный массив с интерполированными значениями.
+        """
+        num_frames = (landmarks.shape[0] - 1) * step + 1
+        num_landmarks, num_coords = landmarks.shape[1], landmarks.shape[2]
+
+        # Индексы известных кадров
+        known_frames = np.arange(0, num_frames, step)
+        # Индексы всех кадров
+        all_frames = np.arange(0, num_frames)
+
+        # Результирующий массив
+        interpolated = np.zeros((num_frames, num_landmarks, num_coords))
+
+        for landmark_idx in range(num_landmarks):
+            for coord_idx in range(num_coords):
+                # Линейная интерполяция
+                interpolated[:, landmark_idx, coord_idx] = np.interp(
+                    all_frames, known_frames, landmarks[:, landmark_idx, coord_idx]
+                )
+
+        return interpolated
 
     def draw_trajectory(
         self,
@@ -213,38 +271,47 @@ class ReelsProcessor:
 
         return frame
 
-    def fit_to_aspect_ratio_9_16(self, frame, crop_frame):
+    def get_figure_bbox(self, landmarks, frames, padding=0.05):
         """
-        Вписывает обрезанное видео в фон 9:16, заполняя сверху и снизу размытым видео.
+        Рассчитывает рамку для фигуры в каждом кадре с отступом (padding).
 
-        Parameters:
-        - frame: исходный кадр видео.
-        - crop_frame: обрезанный кадр с паддингом.
-
-        Returns:
-        - output_frame: кадр 9:16 с размытым фоном.
+        :param landmarks: Массив с координатами для каждого кадра
+        :param frames: Список номеров кадров
+        :param padding: Отступ для рамки (по умолчанию 0.05)
+        :return: Массив рамок (bbox) для каждого кадра, размером (количество кадров, 2, 2)
+                где bbox[i][0] содержит координаты (x_min, y_min) и bbox[i][1] содержит (x_max, y_max)
         """
-        # Размеры целевого фона (9:16)
-        target_width = crop_frame.shape[1]
-        target_height = int(target_width * (16 / 9))
+        bbox = np.zeros((len(frames), 2, 2))  # Массив для хранения рамок
 
-        # Изменяем размер фона
-        blurred_background = cv2.resize(frame, (target_width, target_height))
-        blurred_background = cv2.GaussianBlur(blurred_background, (51, 51), 0)
+        for i, frame in enumerate(frames):
+            x = landmarks[frame][:, 0]
+            y = landmarks[frame][:, 1]
 
-        # Позиционируем обрезанный кадр по центру на фоне 9:16
-        y_offset = (target_height - crop_frame.shape[0]) // 2
-        output_frame = blurred_background.copy()
-        output_frame[y_offset : y_offset + crop_frame.shape[0], :] = crop_frame
+            # Расчет минимальных и максимальных значений с учетом отступа
+            x_min, x_max = x.min() - padding, x.max() + padding
+            y_min, y_max = y.min() - padding, y.max() + padding
 
-        # Проверяем размеры на кратность 2 и корректируем, если необходимо
-        height, width = output_frame.shape[:2]
-        if height % 2 != 0 or width % 2 != 0:
-            new_height = height if height % 2 == 0 else height + 1
-            new_width = width if width % 2 == 0 else width + 1
-            output_frame = cv2.resize(output_frame, (new_width, new_height))
+            # Заполнение bbox для текущего кадра
+            bbox[i][0] = [x_min, y_min]
+            bbox[i][1] = [x_max, y_max]
 
-        return output_frame
+        return bbox
+
+    def get_max_width(self, bboxes):
+        """
+        Находит максимальную ширину среди всех рамок (bbox).
+
+        :param bboxes: Массив рамок, где каждая рамка имеет формат [[x_min, y_min], [x_max, y_max]]
+        :return: Максимальная ширина среди всех рамок
+        """
+        max_width = 0
+        for bbox in bboxes:
+            x_min, _ = bbox[0]
+            x_max, _ = bbox[1]
+            width = x_max - x_min
+            if width > max_width:
+                max_width = width
+        return max_width
 
     def process_jumps(
         self,
@@ -255,228 +322,244 @@ class ReelsProcessor:
         draw_mode="Trajectory",
         progress=None,
     ):
-        print("{Enter to ReelsProcessor}")
         # Применяем интерполяцию для замены нулевых значений в landmarks_tensor
-        landmarks_tensor = self.interpolate_landmarks(landmarks_tensor)
+        # и формирования данных для всего видео с шагом 1
+        landmarks = self.interpolate_zero_landmarks(landmarks_tensor)
+        landmarks = self.interpolate_step_landmarks(landmarks)
 
         cap = cv2.VideoCapture(self.input_video)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        frames_check = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        print(f"{frames_check=}")
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        resolution_original_video = (width, height)  # (w, h)
+        padding = 0.05
 
-        # Устанавливаем размеры для кропа с соотношением 9:16 и делаем их четными
-        crop_width = min(width, int(height * (9 / 16))) + 2 * padding
-        crop_height = min(height, int(width * (16 / 9))) + 2 * padding
+        if not cap.isOpened():
+            raise IOError(f"Не удалось открыть видео: {self.input_video}")
 
-        # Округляем до ближайших четных чисел, чтобы соответствовать требованиям кодека
-        crop_width = crop_width if crop_width % 2 == 0 else crop_width - 1
-        crop_height = crop_height if crop_height % 2 == 0 else crop_height - 1
+        frames_dir = os.path.join(self.temp_dir, "images")
+        os.makedirs(frames_dir, exist_ok=True)
+        clip_dir = os.path.join(self.temp_dir, "output")
+        os.makedirs(clip_dir, exist_ok=True)
 
-        center_points = []
-        hand_points = []
+        full_frames = []
+        for start_frame, end_frame in jump_frames:
+            full_frames += list(range(start_frame, end_frame))
 
-        # Дек для хранения последних координат центральной точки для сглаживания
-        recent_centers = deque(maxlen=smooth_window)
+        # Рассчитываем рамки фигур
+        bboxes = self.get_figure_bbox(landmarks, full_frames, padding=padding)
+        # Фиксируем вертикальную позицию rect_reel
+        max_width = self.get_max_width(bboxes)
+        max_height = max_width * (16 / 9) * (16 / 9)
+        fixed_y_reel = -0.5 - max_height / 2
 
-        original_bitrate = self.get_video_bitrate(self.input_video)
-        processed_clips = []  # для хранения путей к обработанным клипам
+        max_width = int(max_width * resolution_original_video[0])
+        if max_width % 2 != 0:
+            max_width += 1
 
+        max_height = int(max_height * resolution_original_video[1])
+        if max_height % 2 != 0:
+            max_height += 1
+
+        fixed_y_reel *= resolution_original_video[1]
+
+        logger.debug(f"{max_width=}")
+        logger.debug(f"{max_height=}")
+        logger.debug(f"{fixed_y_reel=}")
+
+        fade_points = []
+        frame_count = 0
         for idx, (start_frame, end_frame) in enumerate(jump_frames):
-            logger.info(f"Отрисовка прыжка {idx+1}.")
+            logger.debug(f"--- Прыжок {idx=} ---")
+            frames = list(range(start_frame, end_frame))
+            logger.debug(f"{start_frame=}, {end_frame=}")
+
+            # Если end_frame не задан, установить его на последний кадр видео
+            if end_frame is None:
+                end_frame = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+            # Рассчитываем рамки фигур
+            bboxes = self.get_figure_bbox(landmarks, frames, padding=padding)
+
+            bboxes[:, 0, 0] *= resolution_original_video[0]
+            bboxes[:, 1, 0] *= resolution_original_video[0]
+            bboxes[:, 0, 1] *= resolution_original_video[1]
+            bboxes[:, 1, 1] *= resolution_original_video[1]
+
+            x_min, _ = bboxes[0][0]
+            x_max, _ = bboxes[0][1]
+            initial_x = (x_max + x_min) / 2 - max_width / 2
+            swt_filter = SmoothWindowTracker(
+                initial_x=initial_x, alpha=0.25, threshold=0.025
+            )
+            x_filter = swt_filter
+
+            x_min, _ = bboxes[:, 0, 0], bboxes[:, 0, 1]
+            x_max, _ = bboxes[:, 1, 0], bboxes[:, 1, 1]
+
+            # Вычисляем `detected_x` для всех кадров
+            detected_x = (x_max + x_min) / 2 - max_width / 2
+            # Ограничение в пределах [0, 1 - max_width]
+            detected_x = np.clip(
+                detected_x, 0, resolution_original_video[0] - max_width
+            )
+
+            # Применяем фильтр, если он есть
+            if x_filter:
+                filtered_x = np.array([x_filter(dx) for dx in detected_x]).astype(int)
+            else:
+                filtered_x = detected_x.astype(int)
+
+            crop_y_min = np.full_like(filtered_x, -fixed_y_reel)
+            crop_y_max = np.full_like(filtered_x, -(fixed_y_reel + max_height))
+            crop_y_min = np.clip(crop_y_min, 0, resolution_original_video[1])
+            crop_y_max = np.clip(crop_y_max, 0, resolution_original_video[1])
+            crop_y_min, crop_y_max = crop_y_max, crop_y_min
+
+            crop_x_min = filtered_x
+            crop_x_max = filtered_x + max_width
+            crop_x_min = np.clip(crop_x_min, 0, resolution_original_video[0])
+            crop_x_max = np.clip(crop_x_max, 0, resolution_original_video[0])
+
+            crops = np.column_stack(
+                [
+                    crop_x_min,
+                    crop_y_min,
+                    np.full_like(crop_x_min, max_width),
+                    np.full_like(crop_x_min, (crop_y_max - crop_y_min)),
+                ]
+            )
+
             cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-            # print(f"{landmarks_tensor.shape=}")
-            frames_dir = os.path.join(self.temp_dir, f"jump_clip_{idx}")
-            os.makedirs(frames_dir, exist_ok=True)
 
-            # Сбрасываем счётчик для новой папки
-            frame_count = 0
-
-            print(f"Сохраняем кадры в {frames_dir}")
             for frame_idx in tqdm(
-                range(start_frame, end_frame + 1),
+                range(0, end_frame - start_frame),
                 desc="Отрисовка видео",
             ):
-                # print(f"{frame_idx=}")
                 ret, frame = cap.read()
                 if not ret:
-                    break
+                    break  # Достигнут конец видео
 
-                # Определяем, использовать ли реальные координаты из landmarks_tensor или усредненные
-                if (frame_idx - start_frame) % self.step == 0:
-                    # print(f"STEP FRAME - {frame_idx=}")
-                    # print(f"LM IDX - {frame_idx // self.step=}")
-                    # Индекс landmarks_tensor для текущего кадра
-                    # Получаем исходные координаты центральной точки из landmarks_tensor
-                    original_center_x = int(
-                        (
-                            landmarks_tensor[frame_idx // self.step, 23, 0]
-                            + landmarks_tensor[frame_idx // self.step, 24, 0]
-                        )
-                        / 2
-                        * width
-                    )
-                    original_center_y = int(
-                        (
-                            landmarks_tensor[frame_idx // self.step, 23, 1]
-                            + landmarks_tensor[frame_idx // self.step, 24, 1]
-                        )
-                        / 2
-                        * height
-                    )
-                    center_points.append((original_center_x, original_center_y))
-
-                    # Добавляем координаты центральной точки в очередь для сглаживания
-                    recent_centers.append((original_center_x, original_center_y))
-
-                    # Вычисляем усредненные координаты центра для сглаживания
-                    avg_center_x = int(np.mean([pt[0] for pt in recent_centers]))
-                    avg_center_y = int(np.mean([pt[1] for pt in recent_centers]))
-
-                    # Рассчитываем координаты для обрезки вокруг усредненного центра
-                    x1 = max(0, min(avg_center_x - crop_width // 2, width - crop_width))
-                    y1 = max(
-                        0,
-                        min(avg_center_y - crop_height // 2, height - crop_height),
-                    )
-                    x2 = x1 + crop_width
-                    y2 = y1 + crop_height
-
-                    # Выполняем кроп кадра
-                    cropped_frame = frame[y1:y2, x1:x2]
-
-                    # Обновляем список центральных точек для кропнутого кадра
-                    cropped_center_points = [(x - x1, y - y1) for x, y in center_points]
-
-                    # Получаем исходные координаты руки и корректируем их относительно кропа
-                    original_hand_x = int(
-                        landmarks_tensor[frame_idx // self.step, 0, 0] * width
-                    )
-                    original_hand_y = int(
-                        landmarks_tensor[frame_idx // self.step, 0, 1] * height
-                    )
-                    hand_points.append((original_hand_x, original_hand_y))
-
-                    # Обновляем список точек руки для кропнутого кадра
-                    cropped_hand_points = [(x - x1, y - y1) for x, y in hand_points]
-
-                    if draw_mode == "Trajectory":
-                        # Рисуем центральную точку и траекторию на кропнутом кадре
-                        cropped_frame = self.draw_trajectory(
-                            cropped_frame,
-                            cropped_center_points,
-                            point_color=(102, 153, 0),
-                            line_color=(102, 153, 0),
-                        )
-
-                        # Рисуем траекторию руки на кропнутом кадре
-                        cropped_frame = self.draw_trajectory(
-                            cropped_frame,
-                            cropped_hand_points,
-                            point_color=(0, 102, 153),
-                            line_color=(0, 102, 153),
-                        )
-                    elif draw_mode == "Skeleton":
-                        # Пересчитываем координаты суставов для кропнутого кадра
-                        joints = landmarks_tensor[
-                            frame_idx // self.step, :, :2
-                        ] * np.array([width, height])
-                        cropped_joints = np.array(
-                            [(int(x - x1), int(y - y1)) for x, y in joints]
-                        )
-                        cropped_frame = self.draw_skeleton(
-                            cropped_frame, cropped_joints
-                        )
-
-                    # Вписываем обрезанный кадр в размытую версию
-                    if padding != 0:
-                        output_frame = self.fit_to_aspect_ratio_9_16(
-                            frame, cropped_frame
-                        )
-                    else:
-                        output_frame = cropped_frame
-
-                # Если кадр не кратен step, используем усредненные координаты из recent_centers
-                else:
-                    if recent_centers:
-                        avg_center_x = int(np.mean([pt[0] for pt in recent_centers]))
-                        avg_center_y = int(np.mean([pt[1] for pt in recent_centers]))
-                    else:
-                        avg_center_x, avg_center_y = (
-                            width // 2,
-                            height // 2,
-                        )  # центральная точка по умолчанию
-
-                    # Рассчитываем координаты для обрезки вокруг усредненного центра
-                    x1 = max(0, min(avg_center_x - crop_width // 2, width - crop_width))
-                    y1 = max(
-                        0, min(avg_center_y - crop_height // 2, height - crop_height)
-                    )
-                    x2 = x1 + crop_width
-                    y2 = y1 + crop_height
-
-                    # Выполняем кроп кадра
-                    cropped_frame = frame[y1:y2, x1:x2]
-
-                    # Вписываем обрезанный кадр в размытую версию
-                    if padding != 0:
-                        output_frame = self.fit_to_aspect_ratio_9_16(
-                            frame, cropped_frame
-                        )
-                    else:
-                        output_frame = cropped_frame
+                # Выполняем кроп кадра
+                x1 = crops[frame_idx][0]
+                x2 = crops[frame_idx][0] + crops[frame_idx][2]
+                y1 = crops[frame_idx][1]
+                y2 = crops[frame_idx][1] + crops[frame_idx][3]
+                cropped_frame = frame[y1:y2, x1:x2]
 
                 # Сохраняем кропнутый кадр в виде изображения
                 frame_path = os.path.join(frames_dir, f"frame_{frame_count:05d}.png")
-                # cv2.imwrite(frame_path, output_frame)
-                if not cv2.imwrite(frame_path, output_frame):
-                    print(f"Не удалось сохранить кадр {frame_count} в {frame_path}")
+                if not cv2.imwrite(frame_path, cropped_frame):
+                    print(f"Не удалось сохранить кадр {frame_idx} в {frame_path}")
                 frame_count += 1
 
-            time.sleep(1)
-            logger.info(f"Создание видео из кадров прыжка {idx+1}.")
-            # Создание видео из кропнутых кадров с помощью ffmpeg
-            clip_path = os.path.join(self.temp_dir, f"jump_clip_{idx}.mp4")
-            # Путь к файлу для записи логов ffmpeg
-            ffmpeg_log_path = "ffmpeg_concat.log"
-            # Открываем файл для записи логов
-            with open(ffmpeg_log_path, "a") as log_file:
-                subprocess.run(
-                    [
-                        "ffmpeg",
-                        "-y",
-                        "-framerate",
-                        str(self.video_fps),
-                        "-i",
-                        os.path.join(frames_dir, "frame_%05d.png"),
-                        "-c:v",
-                        "libx264",
-                        "-pix_fmt",
-                        "yuv420p",
-                        "-b:v",
-                        f"{original_bitrate}",  # Применяем оригинальный битрейт
-                        "-profile:v",
-                        "high",  # Используем профиль высокого качества
-                        "-crf",
-                        "18",  # Улучшаем качество путем настройки компрессии
-                        clip_path,
-                    ],
-                    stdout=log_file,
-                    stderr=log_file,
-                )
+            logger.debug(f"{frame_count=}")
+            fade_points.append(frame_count)
 
-            processed_clips.append(clip_path)
+        logger.debug(f"{fade_points=}")
+        del fade_points[-1]
+        logger.debug(f"{fade_points=}")
 
         cap.release()
 
-        # Объединяем все фрагменты в итоговое видео
-        final_output_path = os.path.join("processed_video_with_fades.mp4")
-        self.concat_clips(processed_clips, final_output_path)
+        # original_bitrate = self.get_video_bitrate(self.input_video)
+        clip_path = os.path.join(clip_dir, "clip.mp4")
+        # Путь к файлу для записи логов ffmpeg
+        ffmpeg_log_path = f"{clip_dir}/ffmpeg.log"
 
-        # Очистка временных файлов
-        self.cleanup_temp_files()
+        # Длительность эффекта fade-in и fade-out (в секундах)
+        fade_duration = 1
+        total_frames = len(
+            [
+                f
+                for f in os.listdir(frames_dir)
+                if f.startswith("frame_") and f.endswith(".png")
+            ]
+        )
+        total_duration = total_frames / fps  # Общая длительность видео
 
-        return final_output_path
+        # Вычисляем временные метки переходов
+        fade_points_sec = [point / fps for point in fade_points]
+
+        filter_complex = f"[0:v]fps={fps},split={len(fade_points)+1}"
+
+        # Формируем вступительную часть
+        for i in range(len(fade_points) + 1):
+            filter_complex += f"[v{i}]"
+
+        filter_complex += ";"
+
+        if len(fade_points) > 0:
+            # Формируем части для `trim` и `fps`
+            for i, (start, end) in enumerate(
+                zip(
+                    [0] + fade_points_sec,
+                    fade_points_sec + [total_duration],
+                )
+            ):
+                filter_complex += (
+                    f"[v{i}]trim={start}:{end},setpts=PTS-STARTPTS[v{i}trim];"
+                )
+                filter_complex += f"[v{i}trim]fps={fps}[v{i}fixed];"
+
+            # Формируем части для `xfade`
+            for i in range(len(fade_points_sec)):
+                offset = fade_points_sec[i] - (i + 1) * (fade_duration / 2)
+                prev = f"vx{i}fade" if i > 0 else "v0fixed"
+                filter_complex += f"[{prev}][v{i+1}fixed]xfade=transition=fade:duration={fade_duration}:offset={offset}[vx{i+1}fade];"
+
+            filter_complex += f"[vx{i+1}fade]fade=in:0:{int(fade_duration * fps)},"
+        else:
+            filter_complex += f"[v0]fade=in:0:{int(fade_duration * fps)},"
+
+        # Формируем части для `fade` и отступов
+        filter_complex += (
+            f"fade=out:{int((total_duration - (i+1)*(fade_duration / 2) - fade_duration) * fps)}:{int(fade_duration * fps)},"
+            f"split[vmain][vblur];"
+            f"[vblur]scale=iw:-1,boxblur=luma_radius=20:luma_power=1,"
+            f"scale=iw:iw*16/9,setsar=1[vbg];"
+            f"[vbg][vmain]overlay=0:(H-h)/2,"
+            f"scale=trunc(iw/2)*2:trunc(ih/2)*2[vout]"
+        )
+
+        # Сохраняем в файл
+        filter_file = f"{clip_dir}/filter_complex.txt"
+        with open(filter_file, "w") as f:
+            f.write(filter_complex)
+
+        time.sleep(1)
+        # Запуск команды FFmpeg
+        with open(ffmpeg_log_path, "a") as log_file:
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-framerate",
+                    str(fps),
+                    "-i",
+                    os.path.join(frames_dir, "frame_%05d.png"),
+                    "-filter_complex",
+                    # filter_file,
+                    filter_complex,
+                    "-map",
+                    "[vout]",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-b:v",
+                    "4M",  # Примерно 4 Mbps
+                    "-profile:v",
+                    "high",
+                    "-crf",
+                    "18",
+                    clip_path,
+                ],
+                stdout=log_file,
+                stderr=log_file,
+            )
+
+        return clip_path
 
     # Дополнительная функция для получения длительности видео
     def get_video_duration(self, video_path):
