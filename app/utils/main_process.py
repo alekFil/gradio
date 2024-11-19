@@ -22,12 +22,12 @@ hash_pattern = re.compile(r"/([a-f0-9]{64})/")
 
 
 @log_execution_time(logger, "Начало расчета landmarks", "Окончание расчета landmarks")
-def calculate_landmarks(video_file, video_hash):
+def calculate_landmarks(video_file, video_hash, calculate_type="pre"):
     landmarks_data, world_landmarks_data, figure_masks_data = LandmarksProcessor(
         LANDMARK_MODELS["Lite"],
         video_hash,
         do_resize=True,
-    ).process_video(video_file, step=3)
+    ).process_video(video_file, calculate_type)
     return landmarks_data, world_landmarks_data, figure_masks_data
 
 
@@ -40,9 +40,9 @@ def process_video(
     gradio_dirname = hash_pattern.search(video_file).group(1)
     logger.debug(f"Начата работа с видео: {gradio_dirname}")
 
-    if not u.check_video(video_file):
-        logger.debug("Обнаружено нестандартное видео. Производится перекодировка")
-        video_file = u.update_video(video_file)
+    # if not u.check_video(video_file):
+    #     logger.debug("Обнаружено нестандартное видео. Производится перекодировка")
+    #     video_file = u.update_video(video_file)
 
     # Генерируем хеш видеофайла
     video_hash = u.generate_video_hash(video_file)
@@ -56,6 +56,7 @@ def process_video(
         landmarks_data, world_landmarks_data, _ = calculate_landmarks(
             video_file,
             video_hash,
+            calculate_type="pre",
         )
 
         # Сохраняем landmarks_data в кэш

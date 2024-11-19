@@ -63,8 +63,6 @@ class LandmarksProcessor:
 
         self.result_callback(detection_result, timestamp_ms)
 
-        return frame_resized  # Возвращаем измененный кадр для отображения (если было применено resize)
-
     def result_callback(self, detection_result, timestamp_ms):
         """Обработка результатов детекции для каждого кадра."""
         pose_landmarks_list = detection_result.pose_landmarks
@@ -82,18 +80,18 @@ class LandmarksProcessor:
                         [landmark.x, landmark.y, landmark.z]
                         for landmark in pose_landmarks
                     ],
-                    dtype=np.float32,
+                    dtype=np.float16,
                 )
                 world_landmarks_array = np.array(
                     [
                         [landmark.x, landmark.y, landmark.z]
                         for landmark in pose_world_landmarks
                     ],
-                    dtype=np.float32,
+                    dtype=np.float16,
                 )
 
                 mask_array = (
-                    segmentation_masks[0].numpy_view().astype(np.float32)
+                    segmentation_masks[0].numpy_view().astype(np.float16)
                     if self.calculate_masks
                     else None
                 )
@@ -103,10 +101,10 @@ class LandmarksProcessor:
                     (timestamp_ms, landmarks_array, world_landmarks_array, mask_array)
                 )
         else:
-            landmarks_array = np.zeros((33, 3), dtype=np.float32)
-            world_landmarks_array = np.zeros((33, 3), dtype=np.float32)
+            landmarks_array = np.zeros((33, 3), dtype=np.float16)
+            world_landmarks_array = np.zeros((33, 3), dtype=np.float16)
             mask_array = (
-                np.zeros((self.width, self.height), dtype=np.float32)
+                np.zeros((self.width, self.height), dtype=np.float16)
                 if self.calculate_masks
                 else None
             )
@@ -130,7 +128,7 @@ class LandmarksProcessor:
 
             return (landmarks_data, world_landmarks_data, masks_data)
 
-    def process_video(self, video_path, step=1):
+    def process_video(self, video_path, calculate_type):
         """
         Здесь планируется уйти от OpenCV и не читать все кадры подряд.
         Планирую работать напрямую с ffmpeg
@@ -141,6 +139,8 @@ class LandmarksProcessor:
             return None, None, None
 
         fps = cap.get(cv2.CAP_PROP_FPS)
+        if calculate_type == "pre":
+            step = int(fps / 8.33)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         print(f"{total_frames=}")
         total_processed_frames = total_frames // step

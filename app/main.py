@@ -55,6 +55,7 @@ with gr.Blocks() as fsva:
             choices=["Скелет", "Траектория двух точек", "Чистое видео"],
             value="Чистое видео",
             interactive=False,
+            visible=False,
         )
 
         # Переключатель режима отрисовки
@@ -63,6 +64,7 @@ with gr.Blocks() as fsva:
             choices=["Whatsapp", "Instagram", "Оригинальное качество"],
             value="Оригинальное качество",
             interactive=False,
+            visible=False,
         )
 
     with gr.Row():
