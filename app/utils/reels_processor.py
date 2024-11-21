@@ -319,6 +319,17 @@ class ReelsProcessor:
                 max_width = width
         return max_width
 
+    def adjust_landmarks(self, landmarks, resolution_original_video):
+        adjusted_landmarks = landmarks.copy()
+        adjusted_landmarks[:, :, 0] = adjusted_landmarks[:, :, 0] - 0.5
+        adjusted_landmarks[:, :, 0] = (
+            adjusted_landmarks[:, :, 0]
+            * (640 / 360)
+            * (resolution_original_video[1] / resolution_original_video[0])
+        )
+        adjusted_landmarks[:, :, 0] = adjusted_landmarks[:, :, 0] + 0.5
+        return adjusted_landmarks
+
     def process_jumps(
         self,
         jump_frames,
@@ -339,6 +350,7 @@ class ReelsProcessor:
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fps = cap.get(cv2.CAP_PROP_FPS)
         resolution_original_video = (width, height)  # (w, h)
+        landmarks = self.adjust_landmarks(landmarks, resolution_original_video)
         padding = 0.05
 
         if not cap.isOpened():
@@ -400,7 +412,7 @@ class ReelsProcessor:
             swt_filter = SmoothWindowTracker(
                 initial_x=initial_x,
                 alpha=0.25,
-                threshold=0.025 * resolution_original_video[0],
+                threshold=0.5 * resolution_original_video[0],
             )
             x_filter = swt_filter
 
