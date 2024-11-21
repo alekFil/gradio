@@ -26,7 +26,7 @@ def calculate_landmarks(video_file, video_hash, calculate_type="pre"):
     landmarks_data, world_landmarks_data, figure_masks_data = LandmarksProcessor(
         LANDMARK_MODELS["Lite"],
         video_hash,
-        do_resize=True,
+        do_resize=False,
     ).process_video(video_file, calculate_type)
     return landmarks_data, world_landmarks_data, figure_masks_data
 
@@ -83,6 +83,7 @@ def process_video(
         landmarks_data,
         padding=0,
         draw_mode=draw_mode,
+        video_hash=video_hash,
     )
 
     print("Обработанное видео сохранено как:", processed_video)

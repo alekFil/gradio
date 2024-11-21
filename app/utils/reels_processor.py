@@ -1,4 +1,5 @@
 import os
+import pickle
 import shutil
 import subprocess
 import tempfile
@@ -13,6 +14,11 @@ from utils.logger import setup_logger
 
 # Инициализируем логгер
 logger = setup_logger("main", "app/resources/logs/main.log")
+
+CLIP_DIR = "app/resources/outputs"
+os.makedirs(CLIP_DIR, exist_ok=True)
+CROPS_DIR = "app/resources/crops_cache"
+os.makedirs(CROPS_DIR, exist_ok=True)
 
 
 class SmoothWindowTracker:
@@ -321,6 +327,7 @@ class ReelsProcessor:
         padding=0,
         draw_mode="Trajectory",
         progress=None,
+        video_hash=None,
     ):
         # Применяем интерполяцию для замены нулевых значений в landmarks_tensor
         # и формирования данных для всего видео с шагом 1
@@ -339,8 +346,9 @@ class ReelsProcessor:
 
         frames_dir = os.path.join(self.temp_dir, "images")
         os.makedirs(frames_dir, exist_ok=True)
-        clip_dir = os.path.join(self.temp_dir, "output")
+        clip_dir = os.path.join(CLIP_DIR, video_hash)
         os.makedirs(clip_dir, exist_ok=True)
+        crops_file = os.path.join(CROPS_DIR, f"{video_hash}.pkl")
 
         full_frames = []
         for start_frame, end_frame in jump_frames:
@@ -390,7 +398,9 @@ class ReelsProcessor:
             x_max, _ = bboxes[0][1]
             initial_x = (x_max + x_min) / 2 - max_width / 2
             swt_filter = SmoothWindowTracker(
-                initial_x=initial_x, alpha=0.25, threshold=0.025
+                initial_x=initial_x,
+                alpha=0.25,
+                threshold=0.025 * resolution_original_video[0],
             )
             x_filter = swt_filter
 
@@ -429,6 +439,9 @@ class ReelsProcessor:
                     np.full_like(crop_x_min, (crop_y_max - crop_y_min)),
                 ]
             )
+
+            with open(crops_file, "wb") as f:
+                pickle.dump(crops, f)
 
             cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 

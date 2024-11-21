@@ -22,6 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN mkdir -p app/resources/landmarks_cache \
     app/resources/logs \
     app/resources/outputs \
+    app/resources/crops_cache \
     app/resources/preds_cache \
     app/resources/tmp
     

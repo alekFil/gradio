@@ -16,8 +16,8 @@ class LandmarksProcessor:
         self,
         model_path,
         key,
-        new_width=640,
-        new_height=360,
+        new_width=1280,
+        new_height=720,
         display=False,
         calculate_masks=False,
         do_resize=False,
@@ -46,17 +46,7 @@ class LandmarksProcessor:
         self.detector = PoseLandmarker.create_from_options(self.options)
 
     def process_frame(self, frame, timestamp_ms):
-        # Обработка кадра (при необходимости изменяем его размер)
-        # Здесь также уйду от обработки OpenCV - занимает немало времени
-        if self.do_resize:
-            frame_resized = cv2.resize(frame, (self.new_width, self.new_height))
-        else:
-            frame_resized = frame
-
-        self.width = frame_resized.shape[0]
-        self.height = frame_resized.shape[1]
-        frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
 
         # Обработка кадра и получение результата синхронно
         detection_result = self.detector.detect_for_video(mp_image, timestamp_ms)
@@ -171,7 +161,20 @@ class LandmarksProcessor:
                         timestamp_ms = int(
                             ((frame_idx - len(frames_batch) + i + 1) / fps) * 1000
                         )
-                        self.process_frame(frame, timestamp_ms)
+
+                        # Обработка кадра (при необходимости изменяем его размер)
+                        if self.do_resize:
+                            frame_resized = cv2.resize(
+                                frame, (self.new_width, self.new_height)
+                            )
+                        else:
+                            frame_resized = frame
+
+                        self.width = frame_resized.shape[0]
+                        self.height = frame_resized.shape[1]
+                        frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+
+                        self.process_frame(frame_rgb, timestamp_ms)
                         pbar.update(1)
                     frames_batch.clear()
                     check_ids = []
