@@ -166,13 +166,13 @@ class LandmarksProcessor:
                             ((frame_idx - len(frames_batch) + i + 1) / fps) * 1000
                         )
 
-                        logger.debug(f"Размер оригинального изображения {frame.shape=}")
+                        # logger.debug(f"Размер оригинального изображения {frame.shape=}")
                         height_original, width_original = frame.shape[:2]
                         # aspect_ratio_original = width_original / height_original
 
                         # 1. Если высота кадра больше ширины
                         if height_original > width_original:
-                            logger.debug("Анализируется вертикальное изображение")
+                            # logger.debug("Анализируется вертикальное изображение")
                             # Вычисляем ширину для соотношения 16:9
                             new_width = int(height_original * 16 / 9)
                             # Создаем черный холст с размерами (высота кадра, рассчитанная ширина)
@@ -184,10 +184,10 @@ class LandmarksProcessor:
                             # Накладываем кадр на черный холст
                             canvas[:, x_offset : x_offset + width_original] = frame
                             frame_extended = canvas
-                            logger.debug(
-                                f"Размер изображения после "
-                                f"стандартизации {frame_extended.shape=}"
-                            )
+                            # logger.debug(
+                            #     f"Размер изображения после "
+                            #     f"стандартизации {frame_extended.shape=}"
+                            # )
                         else:
                             frame_extended = frame
 
@@ -199,10 +199,10 @@ class LandmarksProcessor:
                         else:
                             frame_resized = frame
 
-                        logger.debug(
-                            f"Размер изображения после "
-                            f"ресайза {frame_resized.shape=}"
-                        )
+                        # logger.debug(
+                        #     f"Размер изображения после "
+                        #     f"ресайза {frame_resized.shape=}"
+                        # )
 
                         self.width = frame_resized.shape[0]
                         self.height = frame_resized.shape[1]
@@ -219,13 +219,13 @@ class LandmarksProcessor:
                 for frame in frames_batch:
                     timestamp_ms = int((frame_idx / fps) * 1000)
 
-                    logger.debug(f"Размер оригинального изображения {frame.shape=}")
+                    # logger.debug(f"Размер оригинального изображения {frame.shape=}")
                     height_original, width_original = frame.shape[:2]
                     # aspect_ratio_original = width_original / height_original
 
                     # 1. Если высота кадра больше ширины
                     if height_original > width_original:
-                        logger.debug("Анализируется вертикальное изображение")
+                        # logger.debug("Анализируется вертикальное изображение")
                         # Вычисляем ширину для соотношения 16:9
                         new_width = int(height_original * 16 / 9)
                         # Создаем черный холст с размерами (высота кадра, рассчитанная ширина)
@@ -237,10 +237,10 @@ class LandmarksProcessor:
                         # Накладываем кадр на черный холст
                         canvas[:, x_offset : x_offset + width_original] = frame
                         frame_extended = canvas
-                        logger.debug(
-                            f"Размер изображения после "
-                            f"стандартизации {frame_extended.shape=}"
-                        )
+                        # logger.debug(
+                        #     f"Размер изображения после "
+                        #     f"стандартизации {frame_extended.shape=}"
+                        # )
                     else:
                         frame_extended = frame
 
@@ -252,9 +252,9 @@ class LandmarksProcessor:
                     else:
                         frame_resized = frame
 
-                    logger.debug(
-                        f"Размер изображения после " f"ресайза {frame_resized.shape=}"
-                    )
+                    # logger.debug(
+                    #     f"Размер изображения после " f"ресайза {frame_resized.shape=}"
+                    # )
                     self.width = frame_resized.shape[0]
                     self.height = frame_resized.shape[1]
                     frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)

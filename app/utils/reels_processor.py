@@ -8,6 +8,7 @@ import time
 # from collections import deque
 import cv2  # type: ignore
 import numpy as np  # type: ignore
+from OneEuroFilter import OneEuroFilter  # type: ignore
 from scipy.interpolate import interp1d  # type: ignore
 from tqdm import tqdm  # type: ignore
 from utils.logger import setup_logger
@@ -406,15 +407,8 @@ class ReelsProcessor:
             bboxes[:, 0, 1] *= resolution_original_video[1]
             bboxes[:, 1, 1] *= resolution_original_video[1]
 
-            x_min, _ = bboxes[0][0]
-            x_max, _ = bboxes[0][1]
-            initial_x = (x_max + x_min) / 2 - max_width / 2
-            swt_filter = SmoothWindowTracker(
-                initial_x=initial_x,
-                alpha=0.25,
-                threshold=0.5 * resolution_original_video[0],
-            )
-            x_filter = swt_filter
+            one_euro_filter = OneEuroFilter(freq=fps, mincutoff=0.5)
+            x_filter = one_euro_filter
 
             x_min, _ = bboxes[:, 0, 0], bboxes[:, 0, 1]
             x_max, _ = bboxes[:, 1, 0], bboxes[:, 1, 1]

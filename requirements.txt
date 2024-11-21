@@ -4,3 +4,4 @@ mediapipe
 tqdm
 opencv-python
 gradio_log
+OneEuroFilter
