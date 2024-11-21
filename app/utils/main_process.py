@@ -23,12 +23,12 @@ hash_pattern = re.compile(r"/([a-f0-9]{64})/")
 
 @log_execution_time(logger, "Начало расчета landmarks", "Окончание расчета landmarks")
 def calculate_landmarks(video_file, video_hash, calculate_type="pre"):
-    landmarks_data, world_landmarks_data, figure_masks_data = LandmarksProcessor(
+    landmarks_data, world_landmarks_data, figure_masks_data, step = LandmarksProcessor(
         LANDMARK_MODELS["Lite"],
         video_hash,
-        do_resize=False,
+        do_resize=True,
     ).process_video(video_file, calculate_type)
-    return landmarks_data, world_landmarks_data, figure_masks_data
+    return landmarks_data, world_landmarks_data, figure_masks_data, step
 
 
 def process_video(
@@ -53,19 +53,28 @@ def process_video(
     if landmarks_data is None:
         # Если данных нет в кэше, запускаем процесс расчета и сохраняем результат
         logger.info("Данных landmarks в кэше не имеется.")
-        landmarks_data, world_landmarks_data, _ = calculate_landmarks(
+        landmarks_data, world_landmarks_data, _, step = calculate_landmarks(
             video_file,
             video_hash,
             calculate_type="pre",
         )
 
+        with open(f"app/resources/landmarks_cache/{video_hash}_lms.txt", "w") as f:
+            f.write(str(list(landmarks_data)))
+
         # Сохраняем landmarks_data в кэш
-        u.save_cached_landmarks(video_hash, landmarks_data, world_landmarks_data)
+        # u.save_cached_landmarks(video_hash, landmarks_data, world_landmarks_data)
         logger.info("Данные landmarks кэшированы.")
     else:
         logger.info("Данные landmarks загружены из кэша.")
 
-    predicted_labels, _ = predict(landmarks_data, world_landmarks_data)
+    predicted_labels, predicted_probs = predict(landmarks_data, world_landmarks_data)
+
+    with open(f"app/resources/preds_cache/{video_hash}_labels.txt", "w") as f:
+        f.write(str(list(predicted_labels.cpu().numpy())))
+
+    with open(f"app/resources/preds_cache/{video_hash}_probs.txt", "w") as f:
+        f.write(str(list(predicted_probs.cpu().numpy())))
 
     reels_fragments = u.find_reels_fragments(predicted_labels, 1, 25)
     if len(reels_fragments) != 0:
@@ -74,10 +83,10 @@ def process_video(
         logger.info("Не обнаружено прыжков. Работа завершена")
         return "Error"
     print(reels_fragments)
-    reels = [(x * 3, y * 3) for x, y in reels_fragments]
+    reels = [(x * step, y * step) for x, y in reels_fragments]
     logger.info(f"{reels}")
 
-    reels_processor = ReelsProcessor(video_file, step=3)
+    reels_processor = ReelsProcessor(video_file, step=step)
     processed_video = reels_processor.process_jumps(
         tuple(reels),
         landmarks_data,

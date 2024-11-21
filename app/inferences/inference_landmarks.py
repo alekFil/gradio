@@ -4,11 +4,15 @@ import cv2  # type: ignore
 import mediapipe as mp  # type: ignore
 import numpy as np  # type: ignore
 from tqdm import tqdm  # type: ignore
+from utils.logger import setup_logger
 
 BaseOptions = mp.tasks.BaseOptions
 PoseLandmarker = mp.tasks.vision.PoseLandmarker
 PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
 VisionRunningMode = mp.tasks.vision.RunningMode
+
+# Инициализируем логгер
+logger = setup_logger("main", "app/resources/logs/main.log")
 
 
 class LandmarksProcessor:
@@ -16,8 +20,8 @@ class LandmarksProcessor:
         self,
         model_path,
         key,
-        new_width=1280,
-        new_height=720,
+        new_width=640,
+        new_height=360,
         display=False,
         calculate_masks=False,
         do_resize=False,
@@ -162,6 +166,7 @@ class LandmarksProcessor:
                             ((frame_idx - len(frames_batch) + i + 1) / fps) * 1000
                         )
 
+                        logger.debug(f"Размер оригинального изображения {frame.shape=}")
                         # Обработка кадра (при необходимости изменяем его размер)
                         if self.do_resize:
                             frame_resized = cv2.resize(
@@ -169,6 +174,11 @@ class LandmarksProcessor:
                             )
                         else:
                             frame_resized = frame
+
+                        logger.debug(
+                            f"Размер изображения после "
+                            f"ресайза {frame_resized.shape=}"
+                        )
 
                         self.width = frame_resized.shape[0]
                         self.height = frame_resized.shape[1]
@@ -184,6 +194,23 @@ class LandmarksProcessor:
             if frames_batch:
                 for frame in frames_batch:
                     timestamp_ms = int((frame_idx / fps) * 1000)
+
+                    logger.debug(f"Размер оригинального изображения {frame.shape=}")
+                    # Обработка кадра (при необходимости изменяем его размер)
+                    if self.do_resize:
+                        frame_resized = cv2.resize(
+                            frame, (self.new_width, self.new_height)
+                        )
+                    else:
+                        frame_resized = frame
+
+                    logger.debug(
+                        f"Размер изображения после " f"ресайза {frame_resized.shape=}"
+                    )
+                    self.width = frame_resized.shape[0]
+                    self.height = frame_resized.shape[1]
+                    frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+
                     self.process_frame(frame, timestamp_ms)
                     check_ids.append(frame_idx)
                     frame_idx += 1
@@ -193,7 +220,7 @@ class LandmarksProcessor:
         landmarks_data, world_landmarks_data, masks_data = self.return_data()
         self.cleanup()
 
-        return landmarks_data, world_landmarks_data, masks_data
+        return landmarks_data, world_landmarks_data, masks_data, step
 
     def cleanup(self):
         """Метод для очистки и освобождения ресурсов."""

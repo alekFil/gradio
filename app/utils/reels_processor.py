@@ -332,7 +332,7 @@ class ReelsProcessor:
         # Применяем интерполяцию для замены нулевых значений в landmarks_tensor
         # и формирования данных для всего видео с шагом 1
         landmarks = self.interpolate_zero_landmarks(landmarks_tensor)
-        landmarks = self.interpolate_step_landmarks(landmarks)
+        landmarks = self.interpolate_step_landmarks(landmarks, step=self.step)
 
         cap = cv2.VideoCapture(self.input_video)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
