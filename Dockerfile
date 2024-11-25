@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y \
     xz-utils \
     libgl1 \
     libglib2.0-0 \
+    fonts-dejavu-core \
     && apt-get remove -y ffmpeg && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz \
     && tar -xf ffmpeg-release-amd64-static.tar.xz \

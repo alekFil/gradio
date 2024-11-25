@@ -578,6 +578,8 @@ class ReelsProcessor:
                 stderr=log_file,
             )
 
+        self.cleanup_temp_files()
+
         return clip_path
 
     # Дополнительная функция для получения длительности видео
