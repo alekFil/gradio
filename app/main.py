@@ -8,7 +8,6 @@ import uuid
 
 import cv2
 import numpy as np
-from gradio_log import Log  # type: ignore
 from inferences.inference_landmarks import LandmarksProcessor
 from PIL import Image, ImageDraw, ImageFont
 from utils.logger import setup_logger
@@ -426,92 +425,142 @@ def generate_stream_with_effects(video_path):
     cap.release()
 
 
-# Gradio интерфейс
-with gr.Blocks() as fsva:
-    gr.Markdown("## Генерация коротких видео прыжков")
+def set_invisible():
+    return gr.update(visible=False)
 
-    with gr.Row():
-        with gr.Column():
-            video_input = gr.Video(
-                label="Загрузите видео для обработки",
-                # Отключаем конкретный тип файла во избежание
-                # автоматической перекодировки
-                # format="mp4",
-                autoplay=True,
-                sources="upload",
-                height=416,
+
+def set_visible():
+    return gr.update(visible=True)
+
+
+def set_interactive():
+    return gr.update(interactive=True)
+
+
+def set_disable():
+    return gr.update(interactive=False)
+
+
+# Gradio интерфейс
+with gr.Blocks(theme="shivi/calm_seafoam") as fsva:
+    intro_text = """
+    # Добро пожаловать в сервис анализа выступлений по фигурному катанию!
+
+    Здесь вы можете:
+    - Загрузить видео своего выступления.
+    - Провести анализ с помощью нейросетевых технологий: обнаружить прыжки, построить скелетную модель спортсмена и автоматически обрезать кадры без прыжков.
+    - Получить три варианта фрагментов видео: Normal, Dynamic, Elements.
+    - Скачать финальное видео в высоком качестве с эффектами, наложением скелета и только ключевыми моментами.
+
+    Вы можете оставить свою электронную почту, чтобы мы отправили ссылку на готовый результат прямо вам. Также вы можете воспользоваться уникальным кодом, который система создаст при загрузке видео. Если вы не хотите указывать почту, запомните этот код, чтобы вернуться за своим результатом позже. Просто введите его в специальном поле, и вы получите доступ к обработанному видео.
+
+    **Начните с загрузки своего видео!**
+
+    #### Загружая видео вы соглашаетесь с Правилами обработки персональных данных и Правилами сервиса.
+    """
+
+    gr.Markdown(intro_text)
+
+    with gr.Tab("Загрузить видео"):
+        gr.Markdown("### Загрузите ваше видео для анализа")
+        video_input = gr.File(label="Загрузите видео для обработки")
+
+        with gr.Row():
+            # Переключатель режима отрисовки
+            draw_mode = gr.Radio(
+                label="Выберите режим отрисовки (в разработке)",
+                choices=["Скелет", "Траектория двух точек", "Чистое видео"],
+                value="Чистое видео",
+                interactive=False,
+                visible=False,
             )
 
-        with gr.Column():
-            video_output = gr.Video(
-                label="Обработанное видео",
+            # Переключатель режима отрисовки
+            quality_mode = gr.Radio(
+                label="Выберите качество (в разработке)",
+                choices=["Whatsapp", "Instagram", "Оригинальное качество"],
+                value="Оригинальное качество",
+                interactive=False,
+                visible=False,
+            )
+
+        with gr.Row():
+            # Кнопка запуска
+            run_button = gr.Button(
+                "Сформировать короткое видео", interactive=False, visible=False
+            )
+            # Отключаем кнопку, пока видео не будет загружено
+            video_input.change(enable_button, [video_input], run_button)
+
+        # with gr.Row():
+        #     Log(log_file, dark=False)
+
+        with gr.Row():
+            run_stream_button = gr.Button("Получить видео", interactive=False)
+            video_input.change(enable_button, [video_input], run_stream_button)
+
+        with gr.Row():
+            video_stream_output = gr.Video(
+                label="Анализ...",
+                streaming=True,  # Включаем режим стриминга
                 width=234,
                 height=416,
-                autoplay=True,
-                loop=True,
+                show_download_button=False,
+                visible=False,
             )
 
-    with gr.Row():
-        # Переключатель режима отрисовки
-        draw_mode = gr.Radio(
-            label="Выберите режим отрисовки (в разработке)",
-            choices=["Скелет", "Траектория двух точек", "Чистое видео"],
-            value="Чистое видео",
-            interactive=False,
-            visible=False,
+        with gr.Row():
+            download_button = gr.Button(
+                "Получить все ролики в хорошем качестве",
+                visible=False,
+            )
+
+        with gr.Row():
+            video_outputs = [None, None, None]
+            for i in range(3):
+                with gr.Column():
+                    video_outputs[i] = gr.Video(
+                        label="Обработанное видео",
+                        width=234,
+                        height=416,
+                        autoplay=True,
+                        loop=True,
+                        visible=False,
+                    )
+
+        run_stream_button.click(fn=set_visible, outputs=video_stream_output)
+
+        run_stream_button.click(
+            process_video,
+            inputs=[
+                video_input,
+                draw_mode,
+                quality_mode,
+            ],
+            outputs=[video_outputs[0], video_outputs[1], video_outputs[2]],
         )
 
-        # Переключатель режима отрисовки
-        quality_mode = gr.Radio(
-            label="Выберите качество (в разработке)",
-            choices=["Whatsapp", "Instagram", "Оригинальное качество"],
-            value="Оригинальное качество",
-            interactive=False,
-            visible=False,
+        # Привязка кнопки запуска к стриму
+        run_stream_button.click(
+            fn=generate_stream_with_buffer,
+            inputs=video_input,
+            outputs=video_stream_output,
+            queue=True,  # Включаем очередь для потокового обновления
         )
 
-    with gr.Row():
-        # Кнопка запуска
-        run_button = gr.Button("Сформировать короткое видео", interactive=False)
-        # Отключаем кнопку, пока видео не будет загружено
-        video_input.change(enable_button, [video_input], run_button)
+        # video_outputs[0].change(fn=set_invisible, outputs=video_stream_output)
+        video_outputs[0].change(fn=set_invisible, outputs=run_stream_button)
+        video_outputs[0].change(fn=set_visible, outputs=download_button)
+        for i in range(3):
+            video_outputs[0].change(fn=set_visible, outputs=video_outputs[i])
 
-    with gr.Row():
-        Log(log_file, dark=False)
-
-    with gr.Row():
-        run_stream_button = gr.Button("Запустить стриминг", interactive=False)
-        video_input.change(enable_button, [video_input], run_stream_button)
-
-    with gr.Row():
-        video_stream_output = gr.Video(
-            label="Обработанное видео со стримингом",
-            streaming=True,  # Включаем режим стриминга
-            width=234,
-            height=416,
-            show_download_button=False,
+    with gr.Tab("Поиск готового короткого видео"):
+        gr.Markdown(
+            "### Введите вашу почту или уникальный код, чтобы найти готовое видео"
         )
-
-    # Настраиваем кнопку запуска, чтобы она выводила
-    # короткое видео в соседний столбец
-    run_button.click(
-        process_video,
-        inputs=[
-            video_input,
-            draw_mode,
-            quality_mode,
-        ],
-        outputs=video_output,
-    )
-
-    # Привязка кнопки запуска к стриму
-    run_stream_button.click(
-        # fn=generate_stream_with_effects,
-        fn=generate_stream_with_buffer,
-        inputs=video_input,
-        outputs=video_stream_output,
-        queue=True,  # Включаем очередь для потокового обновления
-    )
+        email_input = gr.Textbox(label="Введите почту")
+        email_search_button = gr.Button("Искать")
+        email_search_output = gr.Label()
 
     logger.info("Сервер загружен")
 

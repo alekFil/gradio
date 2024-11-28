@@ -97,4 +97,4 @@ def process_video(
 
     print("Обработанное видео сохранено как:", processed_video)
 
-    return processed_video
+    return (processed_video, processed_video, processed_video)
