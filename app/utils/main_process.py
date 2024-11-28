@@ -4,6 +4,7 @@ from inferences.inference_elements import predict
 from inferences.inference_landmarks import LandmarksProcessor
 from utils import utils as u
 from utils.logger import setup_logger
+from utils.process_landarks import process_landmarks
 from utils.reels_processor import ReelsProcessor
 from utils.utils import log_execution_time
 
@@ -40,10 +41,6 @@ def process_video(
     gradio_dirname = hash_pattern.search(video_file).group(1)
     logger.debug(f"Начата работа с видео: {gradio_dirname}")
 
-    # if not u.check_video(video_file):
-    #     logger.debug("Обнаружено нестандартное видео. Производится перекодировка")
-    #     video_file = u.update_video(video_file)
-
     # Генерируем хеш видеофайла
     video_hash = u.generate_video_hash(video_file)
     logger.debug(f"Сгенерирован хэш видео: {video_hash}")
@@ -53,10 +50,14 @@ def process_video(
     if landmarks_data is None:
         # Если данных нет в кэше, запускаем процесс расчета и сохраняем результат
         logger.info("Данных landmarks в кэше не имеется.")
-        landmarks_data, world_landmarks_data, _, step = calculate_landmarks(
+        # landmarks_data, world_landmarks_data, _, step = calculate_landmarks(
+        #     video_file,
+        #     video_hash,
+        #     calculate_type="pre",
+        # )
+        landmarks_data, world_landmarks_data, _, step = process_landmarks(
             video_file,
             video_hash,
-            calculate_type="pre",
         )
 
         with open(f"app/resources/landmarks_cache/{video_hash}_lms.txt", "w") as f:
@@ -64,7 +65,7 @@ def process_video(
 
         # Сохраняем landmarks_data в кэш
         # u.save_cached_landmarks(video_hash, landmarks_data, world_landmarks_data)
-        logger.info("Данные landmarks кэшированы.")
+        # logger.info("Данные landmarks кэшированы.")
     else:
         logger.info("Данные landmarks загружены из кэша.")
 

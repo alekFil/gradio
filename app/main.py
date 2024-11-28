@@ -96,10 +96,10 @@ def draw_skeleton(
 
     # Преобразуем тензор в формат NumPy, оставляем только координаты x и y и масштабируем их
     joints_np = (joints[:, :2] * np.array([width, height])).astype(int)
-    print(f"Shape of joints: {joints.shape}")
-    print(f"Example joint: {joints[0, 0]}")
-    print(f"Shape of joints: {joints_np.shape}")
-    print(f"Example joint: {joints_np[0, 0]}")
+    # print(f"Shape of joints: {joints.shape}")
+    # print(f"Example joint: {joints[0, 0]}")
+    # print(f"Shape of joints: {joints_np.shape}")
+    # print(f"Example joint: {joints_np[0, 0]}")
 
     # Отрисовка соединений между суставами
     for start_idx, end_idx in skeleton_connections:
@@ -142,6 +142,8 @@ def convert_to_h264_ts(input_file):
         "23",
         "-f",
         "mpegts",
+        "-loglevel",
+        "error",
         output_file,
     ]
     subprocess.run(command, check=True)
@@ -158,26 +160,6 @@ def darken_frame(frame, alpha=0.7):
         Затемненный кадр.
     """
     return (frame * alpha).astype(np.uint8)
-
-
-def add_text(frame, text="Идет анализ", font_scale=1.5, color=(255, 255, 255)):
-    """
-    Добавляет текст в центр кадра.
-    Args:
-        frame: Исходный кадр.
-        text: Текст для отображения.
-        font_scale: Размер шрифта.
-        color: Цвет текста (BGR).
-    Returns:
-        Кадр с наложенным текстом.
-    """
-    height, width = frame.shape[:2]
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    text_size = cv2.getTextSize(text, font, font_scale, 2)[0]
-    text_x = (width - text_size[0]) // 2
-    text_y = (height + text_size[1]) // 2
-    cv2.putText(frame, text, (text_x, text_y), font, font_scale, color, 2, cv2.LINE_AA)
-    return frame
 
 
 def add_text_with_pillow(
@@ -305,15 +287,10 @@ def process_video_to_buffer(video_path, buffer_queue):
                 timestamp_ms = int(frame_idx / fps * 1000)
                 processor.process_frame(frame, timestamp_ms)
                 skeleton, _, _ = processor.return_data()
-                logger.debug(f"{skeleton.shape=}")
-                logger.debug(f"{skeleton=}")
+                # logger.debug(f"{skeleton.shape=}")
+                # logger.debug(f"{skeleton=}")
                 # Затемняем кадр
                 frame = darken_frame(frame)
-
-                # Наложение текста "Идет анализ"
-                # frame = add_text(
-                #     frame, text="Идет анализ", font_scale=1.5, color=(255, 255, 255)
-                # )
 
                 frame = add_text_with_pillow(
                     frame,
@@ -548,7 +525,6 @@ with gr.Blocks(theme="shivi/calm_seafoam") as fsva:
             queue=True,  # Включаем очередь для потокового обновления
         )
 
-        # video_outputs[0].change(fn=set_invisible, outputs=video_stream_output)
         video_outputs[0].change(fn=set_invisible, outputs=run_stream_button)
         video_outputs[0].change(fn=set_visible, outputs=download_button)
         for i in range(3):
@@ -558,9 +534,8 @@ with gr.Blocks(theme="shivi/calm_seafoam") as fsva:
         gr.Markdown(
             "### Введите вашу почту или уникальный код, чтобы найти готовое видео"
         )
-        email_input = gr.Textbox(label="Введите почту")
+        email_input = gr.Textbox(label="Введите почту или уникальный код")
         email_search_button = gr.Button("Искать")
-        email_search_output = gr.Label()
 
     logger.info("Сервер загружен")
 

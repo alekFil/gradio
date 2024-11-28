@@ -5,8 +5,6 @@ import subprocess
 from functools import wraps
 from time import time
 
-import cv2  # type: ignore
-
 CACHE_DIR = "app/resources/landmarks_cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -134,24 +132,6 @@ def find_reels_fragments(labels, target_class, batch_size):
             fragments.append((start_batch, end_batch))
 
     return fragments
-
-
-def check_video(video_file):
-    """Проверяет соотношение сторон видео. Если оно не горизонтальное 16:9, то возвращает False"""
-    # Открываем видео
-    cap = cv2.VideoCapture(video_file)
-    if not cap.isOpened():
-        raise ValueError(f"Не удалось открыть видеофайл: {video_file}")
-
-    # Получаем ширину и высоту кадра
-    width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-    height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-    cap.release()
-
-    # Проверяем соотношение сторон
-    aspect_ratio = width / height
-    is_16_9 = abs(aspect_ratio - 16 / 9) < 0.01  # Допустимая погрешность
-    return is_16_9
 
 
 def update_video(video_file):
