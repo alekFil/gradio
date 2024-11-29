@@ -1,9 +1,11 @@
+import itertools
 import os
 import pickle
 import shutil
 import subprocess
 import tempfile
 import time
+from multiprocessing import Pool, cpu_count
 
 # from collections import deque
 import cv2  # type: ignore
@@ -579,6 +581,315 @@ class ReelsProcessor:
             )
 
         self.cleanup_temp_files()
+
+        logger.debug(f"Работа с видео {video_hash=} завершена")
+
+        return clip_path
+
+    def process_single_element(self, args):
+        (
+            idx,
+            start_frame,
+            end_frame,
+            frame_counts,
+            input_video,
+            landmarks,
+            padding,
+            fps,
+            resolution_original_video,
+            max_width,
+            max_height,
+            fixed_y_reel,
+            crops_file,
+            frames_dir,
+            fade_points,
+        ) = args
+
+        frame_count = sum(frame_counts[:idx])
+
+        # Создаем объект cv2.VideoCapture для каждого процесса
+        cap = cv2.VideoCapture(input_video)
+        if not cap.isOpened():
+            raise IOError(f"Не удалось открыть видео: {input_video}")
+
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+        logger.debug(f"--- Прыжок {idx=} ---")
+        frames = list(range(start_frame, end_frame))
+        logger.debug(f"{start_frame=}, {end_frame=}")
+        logger.debug(f"frame_count - {frame_counts[idx]=}")
+
+        # Если end_frame не задан, установить его на последний кадр видео
+        if end_frame is None:
+            end_frame = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        # Рассчитываем рамки фигур
+        bboxes = self.get_figure_bbox(landmarks, frames, padding=padding)
+
+        bboxes[:, 0, 0] *= resolution_original_video[0]
+        bboxes[:, 1, 0] *= resolution_original_video[0]
+        bboxes[:, 0, 1] *= resolution_original_video[1]
+        bboxes[:, 1, 1] *= resolution_original_video[1]
+
+        one_euro_filter = OneEuroFilter(freq=fps, mincutoff=0.5)
+        x_filter = one_euro_filter
+
+        x_min, _ = bboxes[:, 0, 0], bboxes[:, 0, 1]
+        x_max, _ = bboxes[:, 1, 0], bboxes[:, 1, 1]
+
+        # Вычисляем `detected_x` для всех кадров
+        detected_x = (x_max + x_min) / 2 - max_width / 2
+        # Ограничение в пределах [0, 1 - max_width]
+        detected_x = np.clip(detected_x, 0, resolution_original_video[0] - max_width)
+
+        # Применяем фильтр, если он есть
+        if x_filter:
+            filtered_x = np.array([x_filter(dx) for dx in detected_x]).astype(int)
+        else:
+            filtered_x = detected_x.astype(int)
+
+        crop_y_min = np.full_like(filtered_x, -fixed_y_reel)
+        crop_y_max = np.full_like(filtered_x, -(fixed_y_reel + max_height))
+        crop_y_min = np.clip(crop_y_min, 0, resolution_original_video[1])
+        crop_y_max = np.clip(crop_y_max, 0, resolution_original_video[1])
+        crop_y_min, crop_y_max = crop_y_max, crop_y_min
+
+        crop_x_min = filtered_x
+        crop_x_max = filtered_x + max_width
+        crop_x_min = np.clip(crop_x_min, 0, resolution_original_video[0])
+        crop_x_max = np.clip(crop_x_max, 0, resolution_original_video[0])
+
+        crops = np.column_stack(
+            [
+                crop_x_min,
+                crop_y_min,
+                np.full_like(crop_x_min, max_width),
+                np.full_like(crop_x_min, (crop_y_max - crop_y_min)),
+            ]
+        )
+
+        with open(crops_file, "wb") as f:
+            pickle.dump(crops, f)
+
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+        for frame_idx in tqdm(
+            range(0, end_frame - start_frame),
+            desc="Отрисовка видео",
+        ):
+            ret, frame = cap.read()
+            if not ret:
+                break  # Достигнут конец видео
+
+            # Выполняем кроп кадра
+            x1 = crops[frame_idx][0]
+            x2 = crops[frame_idx][0] + crops[frame_idx][2]
+            y1 = crops[frame_idx][1]
+            y2 = crops[frame_idx][1] + crops[frame_idx][3]
+            cropped_frame = frame[y1:y2, x1:x2]
+
+            # Сохраняем кропнутый кадр в виде изображения
+            frame_path = os.path.join(frames_dir, f"frame_{frame_count:05d}.png")
+            if not cv2.imwrite(frame_path, cropped_frame):
+                print(f"Не удалось сохранить кадр {frame_idx} в {frame_path}")
+            frame_count += 1
+
+    def process_elements_multiprocessing(
+        self,
+        jump_frames,
+        landmarks_tensor,
+        video_hash=None,
+        *args,
+    ):
+        """
+        Параллельная обработка прыжков.
+
+        :param jump_frames: Список сегментов (start_frame, end_frame).
+        :param landmarks_tensor: Тензор координат.
+        """
+        # Применяем интерполяцию для замены нулевых значений в landmarks_tensor
+        # и формирования данных для всего видео с шагом 1
+        landmarks = self.interpolate_zero_landmarks(landmarks_tensor)
+        landmarks = self.interpolate_step_landmarks(landmarks, step=self.step)
+
+        cap = cv2.VideoCapture(self.input_video)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        resolution_original_video = (width, height)  # (w, h)
+        landmarks = self.adjust_landmarks(landmarks, resolution_original_video)
+        padding = 0.05
+
+        if not cap.isOpened():
+            raise IOError(f"Не удалось открыть видео: {self.input_video}")
+
+        frames_dir = os.path.join(self.temp_dir, "images")
+        os.makedirs(frames_dir, exist_ok=True)
+        clip_dir = os.path.join(CLIP_DIR, video_hash)
+        os.makedirs(clip_dir, exist_ok=True)
+        crops_file = os.path.join(CROPS_DIR, f"{video_hash}.pkl")
+
+        full_frames = []
+        for start_frame, end_frame in jump_frames:
+            full_frames += list(range(start_frame, end_frame))
+
+        # Рассчитываем рамки фигур
+        bboxes = self.get_figure_bbox(landmarks, full_frames, padding=padding)
+        # Фиксируем вертикальную позицию rect_reel
+        max_width = self.get_max_width(bboxes)
+        max_height = max_width * (16 / 9) * (16 / 9)
+        fixed_y_reel = -0.5 - max_height / 2
+
+        max_width = int(max_width * resolution_original_video[0])
+        if max_width % 2 != 0:
+            max_width += 1
+
+        max_height = int(max_height * resolution_original_video[1])
+        if max_height % 2 != 0:
+            max_height += 1
+
+        fixed_y_reel *= resolution_original_video[1]
+
+        logger.debug(f"{max_width=}")
+        logger.debug(f"{max_height=}")
+        logger.debug(f"{fixed_y_reel=}")
+
+        frame_counts = [el[1] - el[0] for el in jump_frames]
+
+        fade_points = list(itertools.accumulate(frame_counts))
+
+        logger.debug(f"{fade_points=}")
+        del fade_points[-1]
+        logger.debug(f"{fade_points=}")
+
+        # Подготовка аргументов для каждого процесса
+        task_args = [
+            (
+                idx,
+                start_frame,
+                end_frame,
+                frame_counts,
+                self.input_video,
+                landmarks,
+                padding,
+                fps,
+                resolution_original_video,
+                max_width,
+                max_height,
+                fixed_y_reel,
+                crops_file,
+                frames_dir,
+                [],
+            )
+            for idx, (start_frame, end_frame) in enumerate(jump_frames)
+        ]
+
+        # Параллельная обработка с использованием пула процессов
+        with Pool(processes=min(len(task_args), cpu_count())) as pool:
+            pool.map(self.process_single_element, task_args)
+
+        cap.release()
+
+        # original_bitrate = self.get_video_bitrate(self.input_video)
+        clip_path = os.path.join(clip_dir, "clip.mp4")
+        # Путь к файлу для записи логов ffmpeg
+        ffmpeg_log_path = f"{clip_dir}/ffmpeg.log"
+
+        # Длительность эффекта fade-in и fade-out (в секундах)
+        fade_duration = 1
+        total_frames = len(
+            [
+                f
+                for f in os.listdir(frames_dir)
+                if f.startswith("frame_") and f.endswith(".png")
+            ]
+        )
+        total_duration = total_frames / fps  # Общая длительность видео
+
+        # Вычисляем временные метки переходов
+        fade_points_sec = [point / fps for point in fade_points]
+
+        filter_complex = f"[0:v]fps={fps},split={len(fade_points)+1}"
+
+        # Формируем вступительную часть
+        for i in range(len(fade_points) + 1):
+            filter_complex += f"[v{i}]"
+
+        filter_complex += ";"
+
+        if len(fade_points) > 0:
+            # Формируем части для `trim` и `fps`
+            for i, (start, end) in enumerate(
+                zip(
+                    [0] + fade_points_sec,
+                    fade_points_sec + [total_duration],
+                )
+            ):
+                filter_complex += (
+                    f"[v{i}]trim={start}:{end},setpts=PTS-STARTPTS[v{i}trim];"
+                )
+                filter_complex += f"[v{i}trim]fps={fps}[v{i}fixed];"
+
+            # Формируем части для `xfade`
+            for i in range(len(fade_points_sec)):
+                offset = fade_points_sec[i] - (i + 1) * (fade_duration / 2)
+                prev = f"vx{i}fade" if i > 0 else "v0fixed"
+                filter_complex += f"[{prev}][v{i+1}fixed]xfade=transition=fade:duration={fade_duration}:offset={offset}[vx{i+1}fade];"
+
+            filter_complex += f"[vx{i+1}fade]fade=in:0:{int(fade_duration * fps)},"
+        else:
+            filter_complex += f"[v0]fade=in:0:{int(fade_duration * fps)},"
+
+        # Формируем части для `fade` и отступов
+        filter_complex += (
+            f"fade=out:{int((total_duration - (i+1)*(fade_duration / 2) - fade_duration) * fps)}:{int(fade_duration * fps)},"
+            f"split[vmain][vblur];"
+            f"[vblur]scale=iw:-1,boxblur=luma_radius=20:luma_power=1,"
+            f"scale=iw:iw*16/9,setsar=1[vbg];"
+            f"[vbg][vmain]overlay=0:(H-h)/2,"
+            f"scale=trunc(iw/2)*2:trunc(ih/2)*2[vout]"
+        )
+
+        # Сохраняем в файл
+        filter_file = f"{clip_dir}/filter_complex.txt"
+        with open(filter_file, "w") as f:
+            f.write(filter_complex)
+
+        time.sleep(1)
+        # Запуск команды FFmpeg
+        with open(ffmpeg_log_path, "a") as log_file:
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-framerate",
+                    str(fps),
+                    "-i",
+                    os.path.join(frames_dir, "frame_%05d.png"),
+                    "-filter_complex",
+                    # filter_file,
+                    filter_complex,
+                    "-map",
+                    "[vout]",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-b:v",
+                    "4M",  # Примерно 4 Mbps
+                    "-profile:v",
+                    "high",
+                    "-crf",
+                    "18",
+                    clip_path,
+                ],
+                stdout=log_file,
+                stderr=log_file,
+            )
+
+        self.cleanup_temp_files()
+
+        logger.debug(f"Работа с видео {video_hash=} завершена")
 
         return clip_path
 

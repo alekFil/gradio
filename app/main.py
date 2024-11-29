@@ -252,79 +252,87 @@ def process_video_to_buffer(video_path, buffer_queue):
         video_path (str): Путь к исходному видеофайлу.
         buffer_queue (queue.Queue): Очередь для хранения готовых фрагментов.
     """
-    cap = cv2.VideoCapture(video_path)
-    processor = LandmarksProcessor(
-        "app/inferences/models/landmarkers/pose_landmarker_lite.task",
-        "stream",
-        do_resize=False,
-    )
-
-    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
-
-    step = int((fps / 8.33))
-    adjusted_fps = fps // step  # Скорректированная частота кадров
-
-    frame_idx = 0
-    while cap.isOpened():
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-        temp_video_path = temp_file.name
-        temp_file.close()
-
-        # Создаем видеозапись для текущего фрагмента
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        out = cv2.VideoWriter(
-            temp_video_path, fourcc, adjusted_fps, (frame_width, frame_height)
+    try:
+        cap = cv2.VideoCapture(video_path)
+        processor = LandmarksProcessor(
+            "app/inferences/models/landmarkers/pose_landmarker_lite.task",
+            "stream",
+            do_resize=False,
         )
 
-        for _ in range(int(fps * CHUNK_DURATION)):
-            ret, frame = cap.read()
+        frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = int(cap.get(cv2.CAP_PROP_FPS))
+
+        step = int((fps / 8.33))
+        adjusted_fps = fps // step  # Скорректированная частота кадров
+
+        frame_idx = 0
+        while cap.isOpened():
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+            temp_video_path = temp_file.name
+            temp_file.close()
+
+            # Создаем видеозапись для текущего фрагмента
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            out = cv2.VideoWriter(
+                temp_video_path, fourcc, adjusted_fps, (frame_width, frame_height)
+            )
+
+            for _ in range(int(fps * CHUNK_DURATION)):
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                if frame_idx % step == 0:
+                    # if frame_idx % 1 == 0:
+                    timestamp_ms = int(frame_idx / fps * 1000)
+                    processor.process_frame(frame, timestamp_ms)
+                    skeleton, _, _ = processor.return_data()
+                    # logger.debug(f"{skeleton.shape=}")
+                    # logger.debug(f"{skeleton=}")
+                    # Затемняем кадр
+                    frame = darken_frame(frame)
+
+                    frame = add_text_with_pillow(
+                        frame,
+                        text="Идет анализ...",
+                        font_path="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                        font_size=32,
+                        color=(255, 255, 255),
+                    )
+
+                    # Добавление индикатора загрузки
+                    frame = add_loading_indicator(frame, frame_idx)
+
+                    frame = draw_skeleton(
+                        frame,
+                        skeleton[0],
+                        SKELETON_CONNECTIONS,
+                        point_color=(0, 255, 0),
+                        line_color=(255, 0, 0),
+                    )
+                    out.write(frame)
+                frame_idx += 1
+
+            out.release()
+
+            if os.path.exists(temp_video_path):
+                ts_file = convert_to_h264_ts(temp_video_path)
+                os.unlink(temp_video_path)  # Удаляем временный mp4 файл
+                buffer_queue.put(ts_file)  # Кладем готовый файл в очередь
+
             if not ret:
                 break
-            if frame_idx % step == 0:
-                # if frame_idx % 1 == 0:
-                timestamp_ms = int(frame_idx / fps * 1000)
-                processor.process_frame(frame, timestamp_ms)
-                skeleton, _, _ = processor.return_data()
-                # logger.debug(f"{skeleton.shape=}")
-                # logger.debug(f"{skeleton=}")
-                # Затемняем кадр
-                frame = darken_frame(frame)
 
-                frame = add_text_with_pillow(
-                    frame,
-                    text="Идет анализ...",
-                    font_path="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                    font_size=32,
-                    color=(255, 255, 255),
-                )
+        cap.release()
+        buffer_queue.put(None)  # Указатель на завершение обработки
 
-                # Добавление индикатора загрузки
-                frame = add_loading_indicator(frame, frame_idx)
-
-                frame = draw_skeleton(
-                    frame,
-                    skeleton[0],
-                    SKELETON_CONNECTIONS,
-                    point_color=(0, 255, 0),
-                    line_color=(255, 0, 0),
-                )
-                out.write(frame)
-            frame_idx += 1
-
-        out.release()
-
-        if os.path.exists(temp_video_path):
-            ts_file = convert_to_h264_ts(temp_video_path)
-            os.unlink(temp_video_path)  # Удаляем временный mp4 файл
-            buffer_queue.put(ts_file)  # Кладем готовый файл в очередь
-
-        if not ret:
-            break
-
-    cap.release()
-    buffer_queue.put(None)  # Указатель на завершение обработки
+    except Exception as e:
+        logger.error(f"Ошибка во время обработки видео: {e}")
+    finally:
+        if cap.isOpened():
+            cap.release()
+        buffer_queue.put(None)  # Завершающий маркер
 
 
 def generate_stream_with_buffer(video_path):

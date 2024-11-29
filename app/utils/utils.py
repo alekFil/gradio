@@ -103,8 +103,16 @@ def find_reels_fragments(labels, target_class, batch_size):
                 batch_index = middle_index // batch_size
 
                 # Определяем начало и конец соседних батчей
-                start_batch = max(0, (batch_index - 1) * batch_size)
-                end_batch = min(len(labels) - 1, (batch_index + 2) * batch_size - 1)
+                # Реализуем уменьшение диапазона фрагмента смещением
+                # offset_factor = 2 означает, что от соседних батчей берем только по 12 кадров
+                offset_factor = 2
+                offset = batch_size // offset_factor
+                offset = 0
+                start_batch = max(0, (batch_index - 1) * batch_size + offset)
+                end_batch = min(
+                    len(labels) - 1,
+                    (batch_index + 2) * batch_size - 1 - offset,
+                )
 
                 # Объединяем с предыдущим фрагментом, если они пересекаются
                 if fragments and start_batch <= fragments[-1][1]:

@@ -78,21 +78,29 @@ def process_video(
         f.write(str(list(predicted_probs.cpu().numpy())))
 
     reels_fragments = u.find_reels_fragments(predicted_labels, 1, 25)
+    # Найдем вращения
+    spins_fragments = u.find_reels_fragments(predicted_labels, 2, 25)
     if len(reels_fragments) != 0:
         logger.info(f"Обнаружено {len(reels_fragments)} прыжка(-ов) (указаны кадры):")
     else:
         logger.info("Не обнаружено прыжков. Работа завершена")
         return "Error"
     print(reels_fragments)
+    print(spins_fragments)
     reels = [(x * step, y * step) for x, y in reels_fragments]
     logger.info(f"{reels}")
 
     reels_processor = ReelsProcessor(video_file, step=step)
-    processed_video = reels_processor.process_jumps(
+    # processed_video = reels_processor.process_jumps(
+    #     tuple(reels),
+    #     landmarks_data,
+    #     padding=0,
+    #     draw_mode=draw_mode,
+    #     video_hash=video_hash,
+    # )
+    processed_video = reels_processor.process_elements_multiprocessing(
         tuple(reels),
         landmarks_data,
-        padding=0,
-        draw_mode=draw_mode,
         video_hash=video_hash,
     )
 
