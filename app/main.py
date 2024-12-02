@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 from inferences.inference_landmarks import LandmarksProcessor
 from PIL import Image, ImageDraw, ImageFont
+from utils import utils as u
 from utils.logger import setup_logger
 from utils.main_process import process_video
 
@@ -116,7 +117,7 @@ def draw_skeleton(
     return frame
 
 
-def convert_to_h264_ts(input_file):
+def convert_to_h264_ts(input_file, video_hash):
     """
     Конвертирует видеофайл в .ts формат с кодеком H.264.
     Args:
@@ -125,7 +126,11 @@ def convert_to_h264_ts(input_file):
         str: Путь к выходному .ts файлу.
     """
     unique_id = uuid.uuid4().hex  # Уникальный идентификатор
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{unique_id}.ts")
+    temp_file = tempfile.NamedTemporaryFile(
+        delete=False,
+        dir=f"app/resources/tmp/{video_hash}",
+        suffix=f"_{unique_id}.ts",
+    )
     output_file = temp_file.name
     temp_file.close()
 
@@ -266,10 +271,14 @@ def process_video_to_buffer(video_path, buffer_queue):
 
         step = int((fps / 8.33))
         adjusted_fps = fps // step  # Скорректированная частота кадров
-
+        video_hash = u.generate_video_hash(video_path)
         frame_idx = 0
         while cap.isOpened():
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+            temp_file = tempfile.NamedTemporaryFile(
+                delete=False,
+                dir=f"app/resources/tmp/{video_hash}",
+                suffix=".mp4",
+            )
             temp_video_path = temp_file.name
             temp_file.close()
 
@@ -317,7 +326,7 @@ def process_video_to_buffer(video_path, buffer_queue):
             out.release()
 
             if os.path.exists(temp_video_path):
-                ts_file = convert_to_h264_ts(temp_video_path)
+                ts_file = convert_to_h264_ts(temp_video_path, video_hash)
                 os.unlink(temp_video_path)  # Удаляем временный mp4 файл
                 buffer_queue.put(ts_file)  # Кладем готовый файл в очередь
 
@@ -355,59 +364,6 @@ def generate_stream_with_buffer(video_path):
         if ts_file is None:  # Если обработка завершена
             break
         yield ts_file
-
-
-def generate_stream_with_effects(video_path):
-    """
-    Генератор стрима видео с отрисовкой скелета на кадре.
-    Args:
-        video_path (str): Путь к загруженному видео.
-    Yields:
-        bytes: Кадры видео в виде байтов JPEG.
-    """
-    cap = cv2.VideoCapture(video_path)
-    processor = LandmarksProcessor(
-        "app/inferences/models/landmarkers/pose_landmarker_lite.task",
-        "stream",
-        do_resize=False,
-    )
-
-    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
-
-    frame_idx = 0
-    while cap.isOpened():
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-        temp_video_path = temp_file.name
-        temp_file.close()  # Закрываем, чтобы ffmpeg мог писать
-
-        # Создаём видеопоток для записи текущей порции
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        out = cv2.VideoWriter(temp_video_path, fourcc, fps, (frame_width, frame_height))
-
-        for _ in range(int(fps * 2)):  # Пишем 2 секунды видео
-            ret, frame = cap.read()
-            if not ret:
-                break
-            timestamp_ms = int(frame_idx / fps * 1000)
-            # Получение данных о скелете и отрисовка
-            processor.process_frame(frame, timestamp_ms)
-            skeleton, _, _ = processor.return_data()
-            logger.debug(f"{len(skeleton)=}")
-            logger.debug(f"{skeleton=}")
-            frame_idx += 1
-
-            out.write(frame)
-
-        out.release()
-
-        if os.path.exists(temp_video_path):
-            yield temp_video_path
-
-        # time.sleep(0.033)  # Эмуляция реального времени
-
-    cap.release()
 
 
 def set_invisible():

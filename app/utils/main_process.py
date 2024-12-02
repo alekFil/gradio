@@ -90,7 +90,7 @@ def process_video(
     reels = [(x * step, y * step) for x, y in reels_fragments]
     logger.info(f"{reels}")
 
-    reels_processor = ReelsProcessor(video_file, step=step)
+    reels_processor = ReelsProcessor(video_file, video_hash, step=step)
     # processed_video = reels_processor.process_jumps(
     #     tuple(reels),
     #     landmarks_data,

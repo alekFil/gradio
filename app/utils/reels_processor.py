@@ -3,7 +3,6 @@ import os
 import pickle
 import shutil
 import subprocess
-import tempfile
 import time
 from multiprocessing import Pool, cpu_count
 
@@ -54,7 +53,7 @@ class SmoothWindowTracker:
 
 
 class ReelsProcessor:
-    def __init__(self, input_video, step=1):
+    def __init__(self, input_video, video_hash, step=1):
         """
         Инициализация процессора видео.
 
@@ -65,7 +64,9 @@ class ReelsProcessor:
         self.input_video = input_video
         self.video_fps = self._get_video_fps()
         self.temp_files = []
-        self.temp_dir = tempfile.mkdtemp()  # Временная директория для кадров
+        self.temp_dir = (
+            f"app/resources/tmp/{video_hash}"  # Временная директория для кадров
+        )
         self.step = step
         self.skeleton_connections = [
             (0, 2),
@@ -791,7 +792,7 @@ class ReelsProcessor:
         cap.release()
 
         # original_bitrate = self.get_video_bitrate(self.input_video)
-        clip_path = os.path.join(clip_dir, "clip.mp4")
+        clip_path = os.path.join(clip_dir, f"{video_hash}.mp4")
         # Путь к файлу для записи логов ffmpeg
         ffmpeg_log_path = f"{clip_dir}/ffmpeg.log"
 
@@ -929,124 +930,6 @@ class ReelsProcessor:
             text=True,
         )
         return int(result.stdout.strip())
-
-    def concat_clips(self, clips, output_path):
-        # Путь к файлу для записи логов ffmpeg
-        ffmpeg_log_path = "ffmpeg_concat.log"
-
-        # Открываем файл для записи логов
-        with open(ffmpeg_log_path, "a") as log_file:
-            # Временные параметры для эффектов
-            intermediate_output = "intermediate_temp.mp4"
-            fade_duration = 1  # Длительность переходов
-            original_bitrate = self.get_video_bitrate(self.input_video)
-
-            logger.info("Создание вступительного перехода видео")
-            # Применяем fade-in к первому клипу
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-i",
-                    clips[0],
-                    "-vf",
-                    f"fade=t=in:st=0:d={fade_duration}",
-                    "-c:v",
-                    "libx264",
-                    "-pix_fmt",
-                    "yuv420p",
-                    "-b:v",
-                    f"{original_bitrate}",  # Применяем оригинальный битрейт
-                    "-profile:v",
-                    "high",
-                    "-crf",
-                    "18",
-                    intermediate_output,
-                ],
-                stdout=log_file,
-                stderr=log_file,
-            )
-
-            # Начальный offset для первого перехода
-            current_offset = (
-                self.get_video_duration(intermediate_output) - fade_duration
-            )
-
-            logger.info("Создание переходов между прыжками")
-            # Проходим по остальным клипам, объединяя их с эффектом xfade и корректируя offset
-            for i in range(1, len(clips)):
-                next_clip = clips[i]
-                xfade_output = f"temp_xfade_{i}.mp4"
-
-                logger.info(f"... прыжок {i}")
-                # Склеиваем текущий промежуточный файл с очередным клипом
-                subprocess.run(
-                    [
-                        "ffmpeg",
-                        "-y",
-                        "-i",
-                        intermediate_output,
-                        "-i",
-                        next_clip,
-                        "-filter_complex",
-                        f"[0:v][1:v]xfade=transition=fade:duration={fade_duration}:offset={current_offset}[v]",
-                        "-map",
-                        "[v]",
-                        "-c:v",
-                        "libx264",
-                        "-pix_fmt",
-                        "yuv420p",
-                        "-b:v",
-                        f"{original_bitrate}",  # Применяем оригинальный битрейт
-                        "-profile:v",
-                        "high",
-                        "-crf",
-                        "18",
-                        xfade_output,
-                    ],
-                    stdout=log_file,
-                    stderr=log_file,
-                )
-
-                # Обновляем промежуточный файл
-                intermediate_output = xfade_output
-
-                # Обновляем offset для следующего перехода
-                current_offset += self.get_video_duration(next_clip) - fade_duration
-
-            logger.info("Создание заключительного перехода видео")
-            # Добавляем fade-out к последнему объединенному клипу
-            final_duration = self.get_video_duration(intermediate_output)
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-i",
-                    intermediate_output,
-                    "-vf",
-                    f"fade=t=out:st={final_duration - fade_duration}:d={fade_duration}",
-                    "-c:v",
-                    "libx264",
-                    "-pix_fmt",
-                    "yuv420p",
-                    "-b:v",
-                    f"{original_bitrate}",  # Применяем оригинальный битрейт
-                    "-profile:v",
-                    "high",
-                    "-crf",
-                    "18",
-                    output_path,
-                ],
-                stdout=log_file,
-                stderr=log_file,
-            )
-
-        logger.info("Готово")
-        # Удаляем временные файлы
-        for i in range(1, len(clips)):
-            os.remove(f"temp_xfade_{i}.mp4")
-        if os.path.exists(intermediate_output):
-            os.remove(intermediate_output)
 
     def cleanup_temp_files(self):
         if os.path.exists(self.temp_dir):

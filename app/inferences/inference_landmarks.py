@@ -177,7 +177,8 @@ class LandmarksProcessor:
                             new_width = int(height_original * 16 / 9)
                             # Создаем черный холст с размерами (высота кадра, рассчитанная ширина)
                             canvas = np.zeros(
-                                (height_original, new_width, 3), dtype=np.uint8
+                                (height_original, new_width, 3),
+                                dtype=np.uint8,
                             )
                             # Вычисляем смещение для центровки кадра
                             x_offset = (new_width - width_original) // 2
